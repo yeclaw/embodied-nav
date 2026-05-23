@@ -1,0 +1,43 @@
+# Environment / IDE
+__pycache__/
+*.pyc
+*.pyo
+.env
+.venv
+env/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Conda
+miniconda3/
+embodied-nav/  # conda env
+
+# Habitat data (too large to commit)
+data/
+.habitat-data/
+*.glb
+*.ply
+*.zip
+
+# Logs
+*.log
+
+# macOS
+.DS_Store
+
+# Environment variables
+.env
+.env.local
+
+# Node (if any)
+node_modules/
+
+# Jupyter
+*.ipynb
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/

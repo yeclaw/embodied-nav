@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🤖 Embodied Navigation Agent</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <style>
+    .glow { box-shadow: 0 0 15px rgba(59, 130, 246, 0.5); }
+    .log-scroll::-webkit-scrollbar { width: 4px; }
+    .log-scroll::-webkit-scrollbar-track { background: #1e293b; }
+    .log-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+    @keyframes pulse-ring {
+      0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+      70% { box-shadow: 0 0 0 8px rgba(59, 130, 246, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+    }
+    .pulse-ring { animation: pulse-ring 1.5s ease-out infinite; }
+    @keyframes typing {
+      from { width: 0; }
+      to { width: 100%; }
+    }
+    .typing { overflow: hidden; white-space: nowrap; animation: typing 1s steps(20, end); }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans min-h-screen">
+
+  <!-- Header -->
+  <header class="border-b border-slate-800 pb-4 mb-6 px-6 pt-6 flex justify-between items-center">
+    <div>
+      <h1 class="text-2xl font-bold text-blue-400 tracking-wide">🤖 Embodied Navigation Agent</h1>
+      <p class="text-xs text-slate-400 mt-1">基于 Habitat-Sim + CLIP + OpenClaw 的具身导航系统 · M1 Pro 运行</p>
+    </div>
+    <div class="flex gap-3 text-sm">
+      <a href="https://github.com" target="_blank" id="gh-link"
+         class="text-slate-400 hover:text-white transition border border-slate-700 px-3 py-1.5 rounded-lg">
+        📂 GitHub
+      </a>
+    </div>
+  </header>
+
+  <!-- Main Layout -->
+  <main class="max-w-7xl mx-auto px-6 space-y-6">
+
+    <!-- Row 1: Control + Video + Thought Chain -->
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+      <!-- Left: Control Panel -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col">
+        <h3 class="text-lg font-semibold text-blue-300 mb-4">🔮 具身智能指令输入</h3>
+
+        <label class="block text-xs text-slate-400 mb-2">自然语言指令：</label>
+        <input id="cmdInput" type="text"
+               placeholder="例如：请到沙发旁边"
+               class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm
+                      focus:outline-none focus:border-blue-500 mb-4
+                      placeholder:text-slate-600">
+
+        <button id="submitBtn" onclick="submitCommand()"
+                class="w-full bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium
+                       py-2 rounded-lg transition mb-4">
+          ▶ 执行导航
+        </button>
+
+        <p class="text-xs text-slate-400 mb-2">快捷导航按钮：</p>
+        <div class="flex flex-wrap gap-2">
+          <button onclick="sendDest('sofa')" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-md transition cursor-pointer">🛋️ 沙发</button>
+          <button onclick="sendDest('bed')" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-md transition cursor-pointer">🛏️ 床</button>
+          <button onclick="sendDest('dining_table')" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-md transition cursor-pointer">🍽️ 餐桌</button>
+          <button onclick="sendDest('desk')" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-md transition cursor-pointer">💻 书桌</button>
+          <button onclick="sendDest('exit')" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-md transition cursor-pointer">🚪 门口</button>
+        </div>
+
+        <div class="mt-auto pt-4 border-t border-slate-800 space-y-1">
+          <div class="text-xs text-slate-400">仿真器状态：
+            <span id="simStatus" class="text-yellow-400 font-mono">⏳ 等待连接...</span>
+          </div>
+          <div class="text-xs text-slate-400">机器人位置：
+            <span id="agentPos" class="text-green-400 font-mono">—</span>
+          </div>
+          <div class="text-xs text-slate-400">特权信息：
+            <span class="text-emerald-400 font-mono">🔒 已禁用（纯视觉驱动）</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Center: Video Stream -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col items-center justify-center min-h-[360px] relative">
+        <div class="absolute top-3 left-4 bg-red-500/20 text-red-400 border border-red-500/30 text-[10px] uppercase font-mono px-2 py-0.5 rounded">
+          Simulator: Habitat-Sim
+        </div>
+        <img id="videoStream" src=""
+             class="w-full rounded-lg object-cover bg-slate-950"
+             style="min-height: 300px;"
+             onerror="videoError()">
+        <div id="videoPlaceholder" class="absolute inset-0 flex items-center justify-center flex-col gap-2 text-slate-500">
+          <div class="text-4xl">🤖</div>
+          <div class="text-sm">正在连接仿真器视频流...</div>
+          <div class="text-xs">确保 server/app.py 已启动</div>
+        </div>
+      </div>
+
+      <!-- Right: Thought Chain -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col">
+        <h3 class="text-lg font-semibold text-blue-300 mb-3">🧠 Agent 思考链</h3>
+        <div id="logConsole"
+             class="bg-slate-950 border border-slate-800 rounded-lg p-3 flex-1 font-mono text-xs
+                    text-green-400 overflow-y-auto log-scroll whitespace-pre-line leading-relaxed
+                    min-h-[200px] max-h-[300px]">
+          等待用户输入指令...
+
+        </div>
+        <div id="agentAsk"
+             class="mt-3 p-3 bg-blue-950/40 border border-blue-900/50 rounded text-sm text-blue-300 hidden">
+          🙋‍♂️ Agent: "任务已完成，请问您还需要什么？"
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Row 2: Status Bar + Info -->
+    <section class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+      <div class="flex items-center justify-between flex-wrap gap-4">
+        <div>
+          <h3 class="text-sm font-semibold text-slate-200 mb-2">📋 系统说明</h3>
+          <p class="text-xs text-slate-400 max-w-2xl">
+            本系统基于纯视觉感知（CLIP）进行具身导航，不依赖任何特权信息（物体精确3D坐标）。
+            机器人通过摄像头捕获房间画面，由 CLIP 模型判断目标方向，再由 Habitat-Sim 路径规划器引导机器人到达目标位置。
+          </p>
+        </div>
+        <div class="flex gap-4 text-xs text-slate-500">
+          <div>🏠 Replica apartment_0</div>
+          <div>📷 CLIP (CPU)</div>
+          <div>🧠 OpenClaw M2.7</div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    const FLASK_BASE = "http://127.0.0.1:5000";
+    let isNavigating = false;
+
+    // Start video stream
+    document.getElementById('videoStream').src = FLASK_BASE + "/video_feed";
+    document.getElementById('videoStream').onload = () => {
+      document.getElementById('videoPlaceholder').style.display = 'none';
+    };
+
+    // Poll status every 2s
+    setInterval(pollStatus, 2000);
+
+    function pollStatus() {
+      fetch(FLASK_BASE + "/api/status")
+        .then(r => r.json())
+        .then(data => {
+          const statusMap = {
+            "ready": '<span class="text-green-400">🟢 运行正常</span>',
+            "busy": '<span class="text-yellow-400">🟡 导航中</span>',
+            "error": '<span class="text-red-400">🔴 错误</span>',
+          };
+          document.getElementById('simStatus').innerHTML =
+            statusMap[data.simulator] || statusMap["error"];
+
+          const pos = data.agent_position;
+          if (pos) {
+            document.getElementById('agentPos').textContent =
+              `(${pos[0].toFixed(2)}, ${pos[1].toFixed(2)}, ${pos[2].toFixed(2)})`;
+          }
+        })
+        .catch(() => {
+          document.getElementById('simStatus').innerHTML =
+            '<span class="text-red-400">🔴 未连接</span>';
+        });
+    }
+
+    function log(msg, type='info') {
+      const console = document.getElementById('logConsole');
+      const prefix = { info: 'ℹ️', success: '✅', error: '❌', thinking: '🤔', nav: '🚶' }[type] || '•';
+      console.innerText += '\n' + prefix + ' ' + msg;
+      console.scrollTop = console.scrollHeight;
+    }
+
+    function sendDest(destination) {
+      const labels = { sofa: '沙发', bed: '床边', dining_table: '餐桌', desk: '书桌', exit: '门口' };
+      document.getElementById('cmdInput').value = '请到' + labels[destination] + '旁边';
+      submitCommand();
+    }
+
+    function submitCommand() {
+      const input = document.getElementById('cmdInput').value.trim();
+      if (!input) return;
+
+      // Infer destination from input
+      const dest = inferDestination(input);
+      if (!dest) {
+        log('无法识别导航目标，请使用快捷按钮或明确说明地点', 'error');
+        return;
+      }
+
+      const labels = { sofa: '沙发', bed: '床边', dining_table: '餐桌', desk: '书桌', exit: '门口' };
+      log('收到指令：' + input, 'info');
+      log('意图解析：前往 [' + labels[dest] + '] (' + dest + ')', 'thinking');
+      log('正在初始化导航...', 'nav');
+
+      document.getElementById('submitBtn').disabled = true;
+      document.getElementById('submitBtn').innerText = '🚶 导航中...';
+      document.getElementById('agentAsk').classList.add('hidden');
+      isNavigating = true;
+
+      fetch(FLASK_BASE + "/api/navigate", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ destination: dest, user_input: input })
+      })
+      .then(r => r.json())
+      .then(data => {
+        isNavigating = false;
+        document.getElementById('submitBtn').disabled = false;
+        document.getElementById('submitBtn').innerText = '▶ 执行导航';
+
+        if (data.success && data.arrived) {
+          log('成功到达 ' + labels[dest] + '！', 'success');
+          log('最终位置: (' + data.arrived_position.map(v => v.toFixed(2)).join(', ') + ')', 'success');
+          document.getElementById('agentAsk').classList.remove('hidden');
+        } else if (data.success) {
+          log('到达目标附近，但未精确抵达', 'error');
+          log('错误: ' + (data.error || '未知'), 'error');
+        } else {
+          log('导航失败: ' + (data.error || '未知错误'), 'error');
+          log('错误码: ' + (data.code || 'N/A'), 'error');
+        }
+      })
+      .catch(e => {
+        isNavigating = false;
+        document.getElementById('submitBtn').disabled = false;
+        document.getElementById('submitBtn').innerText = '▶ 执行导航';
+        log('连接仿真器失败，请确保 server/app.py 已启动', 'error');
+      });
+    }
+
+    function inferDestination(text) {
+      const patterns = [
+        [/(沙发|sofa|sofa|in living room)/i, 'sofa'],
+        [/(床|卧室|bed|bedroom|睡觉|睡眠)/i, 'bed'],
+        [/(餐桌|餐厅|桌子|dining|table|吃饭)/i, 'dining_table'],
+        [/(书桌|办公|desk|office|工作|书房)/i, 'desk'],
+        [/(门口|门|出口|exit|door|出去|出门)/i, 'exit'],
+      ];
+      for (const [pattern, dest] of patterns) {
+        if (pattern.test(text)) return dest;
+      }
+      return null;
+    }
+
+    function videoError() {
+      document.getElementById('videoPlaceholder').style.display = 'flex';
+    }
+  </script>
+</body>
+</html>

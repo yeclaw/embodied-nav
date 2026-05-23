@@ -1,0 +1,14 @@
+# Requirements — embodied-nav
+# These are installed via conda (habitat-sim) and pip (rest)
+
+# Python >= 3.12
+# Install via: conda install habitat-sim withbullet -c conda-forge -c aihabitat
+
+# pip packages
+torch>=2.0.0
+transformers>=4.36.0
+pillow>=10.0.0
+flask>=3.0.0
+opencv-python>=4.9.0
+requests>=2.31.0
+gunicorn>=21.0.0

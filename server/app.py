@@ -58,6 +58,9 @@ ANCHORS = {
 # Init Habitat-Sim
 # ─────────────────────────────────────────────────────────────────────────────
 
+
+
+
 def try_init_real_simulator():
     """Initialize Habitat-Sim with apartment_1.glb test scene."""
     global sim, agent, clip_perception, USE_MOCK
@@ -79,6 +82,7 @@ def try_init_real_simulator():
         return None, None
 
     try:
+        global USE_MOCK
         import numpy as np
         from magnum import Vector3
 
@@ -86,7 +90,7 @@ def try_init_real_simulator():
         sim_cfg = habitat_sim.SimulatorConfiguration()
         sim_cfg.scene_id = scene_path
         sim_cfg.enable_physics = False
-        sim_cfg.create_renderer = False  # Headless mode - avoids GL context crash
+        sim_cfg.create_renderer = True  # Enable real camera - avoids GL context crash
 
         # AgentConfiguration with RGB camera
         acfg = habitat_sim.AgentConfiguration()
@@ -139,7 +143,6 @@ def try_init_real_simulator():
         except Exception as e:
             print(f"[Server] Could not teleport agent: {e}")
 
-        USE_MOCK = False
         print("[Server] ✅ Habitat-Sim initialized (REAL mode)")
 
         # CLIP disabled - using anchor-based navigation
@@ -160,6 +163,7 @@ app = Flask(__name__)
 app.config["JSON_AS_ASCII"] = False
 
 # Init simulator
+_frame_cache = {}
 print("[Server] Loading Habitat-Sim...")
 _init_ok = False
 try:
@@ -172,12 +176,54 @@ except Exception as e:
 if not _init_ok:
     print("[Server] ⚠️ Using MOCK mode (simulator unavailable)")
     USE_MOCK = True
+else:
+    # Pre-render anchor views AFTER sim/agent are initialized
+    # Write to STDERR to bypass Flask stdout capture
+    import sys
+    sys.stderr.write("[Server] Pre-rendering anchor views...\n")
+    sys.stderr.flush()
+    try:
+        import cv2
+        from magnum import Vector3
+        pf = sim.pathfinder
+        anchors = {
+            "spawn": list(agent.get_state().position),
+            "sofa": [2.0, -1.6, 2.8],
+            "bed": [0.5, -1.6, 5.1],
+            "dining_table": [5.8, -1.6, 2.4],
+            "desk": [0.5, -1.6, 3.7],
+            "exit": [5.4, -1.6, -0.5],
+        }
+        import habitat_sim
+        for name, pos in anchors.items():
+            try:
+                state = habitat_sim.AgentState()
+                state.position = list(pos)
+                state.rotation = [0.0, 0.0, 0.0, 1.0]
+                if name != "spawn":
+                    agent.set_state(state)
+                frame = sim.get_sensor_observations()["rgba_camera"]
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)
+                _, jpg = cv2.imencode('.jpg', frame_rgb, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                _frame_cache[name] = jpg.tobytes()
+                sys.stderr.write(f"[PreRender] {name}: {len(jpg)} bytes\n")
+                sys.stderr.flush()
+            except Exception as e2:
+                sys.stderr.write(f"[PreRender] {name} failed: {e2}\n")
+                sys.stderr.flush()
+        sys.stderr.write(f"[PreRender] Done. Cached {len(_frame_cache)} frames.\n")
+        sys.stderr.flush()
+    except Exception as e:
+        sys.stderr.write(f"[Server] Pre-render failed: {e}\n")
+        sys.stderr.flush()
 
 # Import habitat_sim at module level for navigation functions
 try:
     import habitat_sim
 except ImportError:
     habitat_sim = None
+
+# Pre-render call moved to AFTER try_init_real_simulator() returns
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -209,48 +255,40 @@ def _get_state():
     return {"position": [0, 0, 0], "rotation": [0, 0, 0, 1]}
 
 
-def _rgb_to_jpeg(frame):
-    """Convert RGBA numpy array to JPEG bytes."""
+# ─────────────────────────────────────────────────────────────────────────────
+# Pre-rendered frame cache (populated at startup via pre-render inside try_init_real_simulator)
+# ─────────────────────────────────────────────────────────────────────────────
+_current_anchor = "spawn"
+_renderer_ok = True
+_frame_lock = __import__('threading').Lock()
+
+
+# _render_frame removed - Metal GL context not available in HTTP request threads
+
+
+
+
+def _get_frame_mean(jpg_bytes) -> float:
+    """Get mean pixel value of a JPEG frame."""
     import cv2
-    rgb = frame[:, :, :3]
-    # BGR for cv2
-    bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-    ret, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
-    if not ret:
-        return None
-    return buf.tobytes()
+    import numpy as np
+    try:
+        data = np.frombuffer(jpg_bytes, dtype=np.uint8)
+        img = cv2.imdecode(data, cv2.IMREAD_COLOR)
+        if img is not None:
+            return float(img.mean())
+    except:
+        pass
+    return 0.0
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Frame capture loop (background thread)
-# ─────────────────────────────────────────────────────────────────────────────
-latest_frame = None
-frame_lock = threading.Lock()
-stop_capture = threading.Event()
+def _capture_ondemand():
+    """Deprecated - use _frame_cache instead."""
+    return None
 
 
-def _capture_loop():
-    """Continuously capture frames from habitat-sim in background."""
-    global latest_frame
-    _consecutive_errors = 0
-    while not stop_capture.is_set():
-        try:
-            if sim is not None and agent is not None:
-                obs = sim.get_sensor_observations()
-                rgba = obs.get("rgba_camera")
-                if rgba is not None:
-                    with frame_lock:
-                        latest_frame = rgba.copy()
-                    _consecutive_errors = 0
-                else:
-                    _consecutive_errors += 1
-            time.sleep(0.033)  # ~30 FPS
-        except Exception as e:
-            _consecutive_errors += 1
-            # Don't crash - give up after 3 consecutive errors
-            if _consecutive_errors >= 3:
-                break
-            time.sleep(0.1)
+# Global flag - set False if Metal crashes
+_renderer_ok = True
 
 
 # Only start capture thread if simulator is properly initialized
@@ -311,6 +349,10 @@ def _teleport_to_anchor(target: str) -> dict:
         state.position = [float(v) for v in target_pos]
         state.rotation = [0, 0, 0, 1]
         agent.set_state(state)
+        
+        global _current_anchor
+        # Update current anchor reference (no re-rendering - Metal not available in request threads)
+        _current_anchor = target
 
         final_state = agent.get_state()
         arrived_pos = [float(final_state.position[i]) for i in range(3)]
@@ -443,6 +485,9 @@ function updateStatus() {
     document.getElementById('uptimeBadge').textContent = 'UP: ' + Math.floor(d.uptime_seconds) + 's';
     document.getElementById('targetBadge').textContent = 'TARGET: ' + (d.current_target || '--');
     document.getElementById('posBadge').textContent = 'POS: ' + d.agent_position.slice(0,2).map(v=>v.toFixed(1)).join(',');
+    if (d.video_anchor) {
+        img.alt = 'View from: ' + d.video_anchor;
+    }
   });
 }
 
@@ -461,29 +506,24 @@ def index():
 
 
 def _generate_frame():
-    """Generate current frame as JPEG bytes."""
+    """Serve pre-rendered frame from cache (current anchor or spawn)."""
+    global _current_anchor, _frame_cache
+    # Try current anchor first
+    if _current_anchor in _frame_cache:
+        return _frame_cache[_current_anchor]
+    # Fall back to spawn
+    if "spawn" in _frame_cache:
+        _current_anchor = "spawn"
+        return _frame_cache["spawn"]
+    # Ultimate fallback: placeholder
     import cv2
     import numpy as np
-    try:
-        with frame_lock:
-            frame = latest_frame.copy() if latest_frame is not None else None
-        
-        if frame is not None:
-            rgb = frame[:, :, :3]
-            bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-            ret, jpg = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            if ret:
-                return jpg.tobytes()
-    except Exception:
-        pass
-    
-    # Generate placeholder
     placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
     cv2.putText(placeholder, "Habitat-Sim View", (150, 220),
         cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 200, 150), 2)
     cv2.putText(placeholder, "apartment_1.glb", (200, 265),
         cv2.FONT_HERSHEY_SIMPLEX, 0.65, (150, 150, 150), 1)
-    cv2.putText(placeholder, "Headless Mode", (215, 305),
+    cv2.putText(placeholder, "Loading...", (230, 305),
         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 100, 100), 1)
     ret, jpg = cv2.imencode(".jpg", placeholder, [cv2.IMWRITE_JPEG_QUALITY, 60])
     if ret:
@@ -516,6 +556,7 @@ def api_status():
         "uptime_seconds": int(time.time() - start_time),
         "current_target": current_target,
         "agent_position": state["position"],
+        "video_anchor": _current_anchor if '_current_anchor' in dir() else "spawn",
     })
 
 
@@ -567,4 +608,4 @@ if __name__ == "__main__":
         sys.stderr = os.fdopen(os.dup(2), 'w', buffering=1)
     except Exception:
         pass  # If no TTY, that's fine - Python handles it
-    app.run(host="127.0.0.1", port=5001, debug=False, threaded=True)
+    app.run(host="127.0.0.1", port=5001, debug=False, threaded=False)

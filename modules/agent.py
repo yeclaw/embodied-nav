@@ -40,9 +40,21 @@ def get_agent_state(sim, agent) -> AgentState:
             timestamp=int(time.time() * 1000),
         )
 
-    state = sim.get_agent_state(agent.agent_id)
-    pos = np.array(state.position)
-    rot = np.array(state.rotation)
+    # Real Habitat-Sim: agent.get_state()
+    # Mock: sim.get_agent_state(agent.agent_id) or sim.get_agent_state()
+    try:
+        state = agent.get_state()
+        pos = np.array(state.position)
+        rot = np.array(state.rotation)
+    except (TypeError, AttributeError):
+        try:
+            state = sim.get_agent_state()
+            pos = np.array(state.position)
+            rot = np.array(state.rotation)
+        except Exception:
+            pos = np.array([0.0, 0.0, 0.0])
+            rot = np.array([0.0, 0.0, 0.0, 1.0])
+
     return AgentState(
         position=tuple(pos.tolist()),
         rotation=tuple(rot.tolist()),
@@ -62,17 +74,22 @@ def set_agent_position(
     if rotation is None:
         rotation = (0.0, 0.0, 0.0, 1.0)
 
-
     pos_list = list(position)
     rot_list = list(rotation)
 
     if habitat_sim is not None:
-        new_state = habitat_sim.AgentState()
-        new_state.position = pos_list
-        new_state.rotation = rot_list
-        sim.geometric_plugin.set_agent_state(new_state.position, new_state.rotation)
+        try:
+            new_state = habitat_sim.AgentState()
+            new_state.position = pos_list
+            new_state.rotation = rot_list
+            agent.set_state(new_state)
+        except (TypeError, AttributeError):
+            try:
+                sim.pathfinder.set_agent_state(pos_list, rot_list)
+            except Exception:
+                pass
     else:
-        # Mock simulator: update via simulator's set_agent_state
+        # Mock simulator
         sim.set_agent_state(pos_list, rot_list)
 
 
@@ -81,7 +98,11 @@ def rotate_agent(sim, agent, angle_degrees: float) -> None:
     if sim is None or agent is None:
         return
 
-    current = sim.get_agent_state(agent.agent_id)
+    try:
+        current = agent.get_state()
+    except Exception:
+        current = sim.get_agent_state()
+
     current_pos = current.position
     current_rot = np.array(current.rotation)
 

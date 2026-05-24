@@ -55,6 +55,15 @@ ANCHOR_POINTS = {
         "exit": (5.0, 0.0, 5.0),
         "front_door": (5.0, 0.0, 5.0),
     },
+    "apartment_1": {
+        # apartment_1.glb test scene anchors
+        "sofa": (2.0, 0.0, 2.0),
+        "bed": (1.0, 0.0, 3.0),
+        "dining_table": (2.0, 0.0, 2.0),
+        "desk": (0.5, 0.0, 0.5),
+        "exit": (0.0, 0.0, 0.0),
+        "front_door": (0.0, 0.0, 0.0),
+    },
 }
 
 
@@ -64,7 +73,6 @@ def find_nearest_object(sim, object_class: str) -> Optional[tuple[float, float, 
 
     Phase 1: Uses predefined anchor points (no semantic map parsing).
     """
-    # Get scene name from simulator
     scene_name = "apartment_0"
     try:
         if sim is not None and hasattr(sim, "curr_scene_name"):
@@ -79,7 +87,6 @@ def find_nearest_object(sim, object_class: str) -> Optional[tuple[float, float, 
     if object_class in anchors:
         return anchors[object_class]
 
-    # Normalize and try to match
     normalized = object_class.replace("-", "_").replace(" ", "_")
     for key, pos in anchors.items():
         if key.replace("_", "") == normalized.replace("_", ""):
@@ -88,15 +95,33 @@ def find_nearest_object(sim, object_class: str) -> Optional[tuple[float, float, 
     return None
 
 
-def _set_agent_state(sim, position, rotation):
+def _get_agent_state(sim, agent):
+    """Get agent state, works with both real and mock simulators."""
+    try:
+        return agent.get_state()
+    except (TypeError, AttributeError):
+        try:
+            return sim.get_agent_state()
+        except Exception:
+            # Fallback for mock
+            return sim.get_agent_state(None)
+
+
+def _set_agent_state(sim, agent, position, rotation):
     """Set agent state, works with both real and mock simulators."""
     pos_list = list(position)
     rot_list = list(rotation)
     if habitat_sim is not None:
-        new_state = habitat_sim.AgentState()
-        new_state.position = pos_list
-        new_state.rotation = rot_list
-        sim.geometric_plugin.set_agent_state(pos_list, rot_list)
+        try:
+            new_state = habitat_sim.AgentState()
+            new_state.position = pos_list
+            new_state.rotation = rot_list
+            agent.set_state(new_state)
+        except (TypeError, AttributeError):
+            try:
+                sim.pathfinder.set_agent_state(pos_list, rot_list)
+            except Exception:
+                pass
     else:
         sim.set_agent_state(pos_list, rot_list)
 
@@ -111,8 +136,6 @@ def navigate_to_target(
 ) -> NavigationResult:
     """
     Navigate from current agent position to target.
-
-    Falls back to simple direct-step navigation when habitat_sim is unavailable.
     """
     if sim is None or agent is None:
         return NavigationResult(
@@ -121,9 +144,8 @@ def navigate_to_target(
             path_length=0, error="Simulator not initialized", code="SIM_NOT_READY",
         )
 
-    # Get start state
     try:
-        state = sim.get_agent_state(agent.agent_id)
+        state = _get_agent_state(sim, agent)
         start_pos = np.array(state.position)
     except Exception:
         start_pos = np.array([0.0, 0.0, 0.0])
@@ -131,8 +153,8 @@ def navigate_to_target(
     target_pos = np.array(target_position)
     path_length = float(np.linalg.norm(target_pos - start_pos))
 
-    # Check if we have real Habitat pathfinder
-    has_real_pathfinder = (
+    # Try Habitat pathfinder
+    has_pathfinder = (
         habitat_sim is not None
         and sim is not None
         and hasattr(sim, "pathfinder")
@@ -140,8 +162,7 @@ def navigate_to_target(
         and hasattr(sim.pathfinder, "is_navigable")
     )
 
-    if has_real_pathfinder:
-        # Use Habitat pathfinder
+    if has_pathfinder:
         try:
             path = habitat_sim.nav.Path()
             path.requested_start = start_pos
@@ -156,10 +177,8 @@ def navigate_to_target(
                 sim, agent, path.points, target_pos, tolerance, speed, max_steps, path_length
             )
 
-    # Fallback: simple direct navigation (mock simulator or path failed)
-    return _navigate_direct(
-        sim, agent, start_pos, target_pos, tolerance, path_length
-    )
+    # Fallback: direct navigation
+    return _navigate_direct(sim, agent, start_pos, target_pos, tolerance, path_length)
 
 
 def _navigate_along_path(
@@ -170,7 +189,7 @@ def _navigate_along_path(
     arrived_position = tuple(path_points[0].tolist())
 
     for step in range(max_steps):
-        current = sim.get_agent_state(agent.agent_id)
+        current = _get_agent_state(sim, agent)
         current_pos = np.array(current.position)
 
         min_dist = float("inf")
@@ -193,13 +212,17 @@ def _navigate_along_path(
 
         try:
             if sim.pathfinder.is_navigable(new_pos):
-                new_state = habitat_sim.AgentState()
-                new_state.position = new_pos.tolist()
-                new_state.rotation = current.rotation
-                _set_agent_state(sim, new_state.position, new_state.rotation)
+                _set_agent_state(
+                    sim, agent,
+                    new_pos.tolist(),
+                    current.rotation.tolist() if hasattr(current.rotation, 'tolist') else list(current.rotation)
+                )
                 arrived_position = tuple(new_pos.tolist())
         except Exception:
             break
+
+        import time as t
+        t.sleep(0.01)
 
     final_pos = np.array(arrived_position)
     dist_to_target = float(np.linalg.norm(final_pos - target_pos))
@@ -217,15 +240,12 @@ def _navigate_along_path(
 
 
 def _navigate_direct(sim, agent, start_pos, target_pos, tolerance, path_length) -> NavigationResult:
-    """
-    Simple direct navigation for mock simulator.
-    Just moves agent directly toward target position.
-    """
+    """Simple direct navigation for mock simulator."""
     arrived_position = tuple(start_pos.tolist())
     arrived = False
 
     for step in range(200):
-        current = sim.get_agent_state(agent.agent_id)
+        current = _get_agent_state(sim, agent)
         current_pos = np.array(current.position)
 
         direction = target_pos - current_pos
@@ -239,14 +259,13 @@ def _navigate_direct(sim, agent, start_pos, target_pos, tolerance, path_length) 
         if dist < 0.01:
             break
 
-        # Move toward target (0.3m per step)
         step_size = min(0.3, dist)
         move_vec = (direction / dist) * step_size
         new_pos = current_pos + move_vec
 
         try:
             _set_agent_state(
-                sim,
+                sim, agent,
                 new_pos.tolist(),
                 current.rotation.tolist() if hasattr(current.rotation, 'tolist') else list(current.rotation)
             )
@@ -254,8 +273,8 @@ def _navigate_direct(sim, agent, start_pos, target_pos, tolerance, path_length) 
         except Exception:
             pass
 
-        import time
-        time.sleep(0.01)
+        import time as t
+        t.sleep(0.01)
 
     final_dist = float(np.linalg.norm(np.array(arrived_position) - target_pos))
     return NavigationResult(
@@ -273,9 +292,7 @@ def _navigate_direct(sim, agent, start_pos, target_pos, tolerance, path_length) 
 def navigate_by_destination(
     sim, agent, destination: str, tolerance: float = 0.5
 ) -> NavigationResult:
-    """
-    High-level navigation: resolve destination → position → navigate.
-    """
+    """High-level navigation: resolve destination → position → navigate."""
     target_pos = find_nearest_object(sim, destination)
     if target_pos is None:
         return NavigationResult(

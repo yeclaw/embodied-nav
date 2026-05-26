@@ -100,9 +100,8 @@
         </div>
       </div>
 
-      <!-- Right: Thought Chain -->
+      <!-- Right: Log -->
       <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col">
-        <h3 class="text-lg font-semibold text-blue-300 mb-3">🧠 Agent 思考链</h3>
         <div id="logConsole"
              class="bg-slate-950 border border-slate-800 rounded-lg p-3 flex-1 font-mono text-xs
                     text-green-400 overflow-y-auto log-scroll whitespace-pre-line leading-relaxed
@@ -139,7 +138,7 @@
   </main>
 
   <script>
-    const FLASK_BASE = "http://127.0.0.1:5000";
+    const FLASK_BASE = "http://127.0.0.1:5001";
     let isNavigating = false;
 
     // Start video stream
@@ -200,9 +199,7 @@
       }
 
       const labels = { sofa: '沙发', bed: '床边', dining_table: '餐桌', desk: '书桌', exit: '门口' };
-      log('收到指令：' + input, 'info');
-      log('意图解析：前往 [' + labels[dest] + '] (' + dest + ')', 'thinking');
-      log('正在初始化导航...', 'nav');
+      log('→ ' + labels[dest], 'nav');
 
       document.getElementById('submitBtn').disabled = true;
       document.getElementById('submitBtn').innerText = '🚶 导航中...';

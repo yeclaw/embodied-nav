@@ -47,7 +47,8 @@ app.config["JSON_AS_ASCII"] = False
 # ─────────────────────────────────────────────────────────────────────────────
 PORT = 5001
 VOXEL_SIZE_M = 0.2        # Voxel grid resolution in meters
-ARRIVE = 27.0             # CLIP score threshold for ROI target lock (stricter detection)
+ARRIVE = 24.0             # CLIP score threshold for ROI target lock (adjusted slightly lower for robustness)
+MODEL_TYPE = "siglip"     # Dynamic hot-swappable visual model: "siglip" or "clip"
 MAX_STEPS = 250           # Max navigation steps for long-range exploration
 AGENT_HEIGHT = 1.20       # Robot camera height in meters
 FLOOR_MIN = -1.8          # Floor height range min in meters
@@ -61,6 +62,8 @@ TARGET_LABELS = {
     "dining_table": "a photo of a dining table in a kitchen",
     "desk": "a photo of a desk in an office",
     "exit": "a photo of a door or hallway exit",
+    "television": "a photo of a television screen in a living room",
+    "chair": "a photo of a chair in a room",
 }
 
 # Comprehensive Chinese-to-English translation dictionary for common household objects
@@ -144,8 +147,10 @@ def sim_execute(cmd, *args):
 sim_initialized = False
 sim_use_mock = False
 clip_initialized = False
-clip_model = None
-clip_processor = None
+siglip_model = None
+siglip_processor = None
+clip_model_openai = None
+clip_processor_openai = None
 clip_device = None
 
 current_frame_bytes = b""
@@ -193,29 +198,33 @@ def add_thinking(log_line):
 # CLIP Inference (Thread-safe, PyTorch runs fine in Flask threads)
 # ─────────────────────────────────────────────────────────────────────────────
 def load_clip():
-    """Load CLIP model into memory."""
-    global clip_model, clip_processor, clip_device, clip_initialized
+    """Load both SigLIP and original OpenAI CLIP models into memory."""
+    global siglip_model, siglip_processor, clip_model_openai, clip_processor_openai, clip_device, clip_initialized
     try:
-        sys.stderr.write("[CLIP Init] Loading CLIP model (openai/clip-vit-base-patch32)...\n")
-        sys.stderr.flush()
         import torch
-        from transformers import CLIPModel, CLIPProcessor
+        from transformers import SiglipModel, SiglipProcessor, CLIPModel, CLIPProcessor
         
-        device = torch.device("cpu") # Robust CPU inference
-        model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
-        processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+        clip_device = torch.device("cpu") # Robust CPU inference
         
-        model.to(device)
-        model.eval()
+        sys.stderr.write("[CLIP Init] Loading SigLIP model (google/siglip-base-patch16-224)...\n")
+        sys.stderr.flush()
+        siglip_model = SiglipModel.from_pretrained("google/siglip-base-patch16-224")
+        siglip_processor = SiglipProcessor.from_pretrained("google/siglip-base-patch16-224")
+        siglip_model.to(clip_device)
+        siglip_model.eval()
         
-        clip_model = model
-        clip_processor = processor
-        clip_device = device
+        sys.stderr.write("[CLIP Init] Loading original CLIP model (openai/clip-vit-base-patch32)...\n")
+        sys.stderr.flush()
+        clip_model_openai = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+        clip_processor_openai = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+        clip_model_openai.to(clip_device)
+        clip_model_openai.eval()
+        
         clip_initialized = True
-        sys.stderr.write("[CLIP Init] CLIP model successfully loaded!\n")
+        sys.stderr.write("[CLIP Init] Both SigLIP and OpenAI CLIP models successfully loaded!\n")
         sys.stderr.flush()
     except Exception as e:
-        sys.stderr.write(f"[CLIP Init Error] Failed to load CLIP: {e}\n")
+        sys.stderr.write(f"[CLIP Init Error] Failed to load models: {e}\n")
         sys.stderr.flush()
 
 def wait_for_clip(timeout=20):
@@ -227,43 +236,88 @@ def wait_for_clip(timeout=20):
         time.sleep(0.2)
     return True
 
-# Caching global variables for tokenized target text features
+# Caching global variables for tokenized target text features and temporal smoothing
 cached_target_text_features = None
 cached_target_prompt = None
+smoothed_clip_score = 0.0
 
-def get_clip_score(image: Image.Image, target: str) -> float:
-    """Compute CLIP logit similarity score between image and target prompt."""
-    global cached_target_text_features, cached_target_prompt
+def get_clip_score(image: Image.Image, target: str, alpha: float = 0.4) -> float:
+    """Compute scoring dynamically based on configured MODEL_TYPE."""
+    global cached_target_text_features, cached_target_prompt, smoothed_clip_score
     if not clip_initialized:
         wait_for_clip(20)
-    if not clip_initialized or clip_model is None:
+    if not clip_initialized:
         return 0.0
     try:
         import torch
         prompt = TARGET_LABELS.get(target, f"a photo of a {target}")
         
-        # Pre-compute and cache the text features once if target prompt changes
-        if cached_target_text_features is None or cached_target_prompt != prompt:
-            text_inputs = clip_processor(text=[prompt], return_tensors="pt", padding=True)
-            text_inputs = {k: v.to(clip_device) for k, v in text_inputs.items()}
+        if MODEL_TYPE == "siglip":
+            if siglip_model is None or siglip_processor is None:
+                return 0.0
+            neg_prompt = "a photo of walls, floor or empty space"
+            
+            # Reset cache if prompt changes or last model was not siglip
+            if cached_target_text_features is None or cached_target_prompt != prompt or getattr(get_clip_score, "last_model_type", None) != "siglip":
+                text_inputs = siglip_processor(text=[prompt, neg_prompt], padding="max_length", return_tensors="pt")
+                text_inputs = {k: v.to(clip_device) for k, v in text_inputs.items()}
+                with torch.no_grad():
+                    text_features = siglip_model.get_text_features(**text_inputs)
+                    text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+                    cached_target_text_features = text_features
+                    cached_target_prompt = prompt
+                    get_clip_score.last_model_type = "siglip"
+            
+            # Compute image features
+            image_inputs = siglip_processor(images=[image], return_tensors="pt")
+            image_inputs = {k: v.to(clip_device) for k, v in image_inputs.items()}
             with torch.no_grad():
-                text_features = clip_model.get_text_features(**text_inputs)
-                text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-                cached_target_text_features = text_features
-                cached_target_prompt = prompt
+                image_features = siglip_model.get_image_features(**image_inputs)
+                image_features = image_features / image_features.norm(dim=-1, keepdim=True)
                 
-        # Fast Image-only encoding and cosine similarity computation
-        image_inputs = clip_processor(images=[image], return_tensors="pt")
-        image_inputs = {k: v.to(clip_device) for k, v in image_inputs.items()}
-        with torch.no_grad():
-            image_features = clip_model.get_image_features(**image_inputs)
-            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+                logit_scale = siglip_model.logit_scale.exp().item()
+                logits = (image_features @ cached_target_text_features.T) * logit_scale
+                
+                # Softmax relative target probability (Idea A)
+                probs = torch.softmax(logits, dim=-1)
+                target_prob = probs[0, 0].item()
+                raw_similarity = target_prob * 30.0
+                
+            # EMA Smoothing (Idea B) with Adaptive Alpha support
+            if smoothed_clip_score == 0.0:
+                smoothed_clip_score = raw_similarity
+            else:
+                smoothed_clip_score = alpha * raw_similarity + (1 - alpha) * smoothed_clip_score
+                
+            return smoothed_clip_score
             
-            # logit scale standard scaling factor
-            logit_scale = clip_model.logit_scale.exp().item()
-            similarity = (image_features @ cached_target_text_features.T).item() * logit_scale
+        else:
+            # Original OpenAI CLIP mode
+            if clip_model_openai is None or clip_processor_openai is None:
+                return 0.0
             
-        return similarity
+            # Reset cache if prompt changes or last model was not clip
+            if cached_target_text_features is None or cached_target_prompt != prompt or getattr(get_clip_score, "last_model_type", None) != "clip":
+                text_inputs = clip_processor_openai(text=[prompt], padding=True, return_tensors="pt")
+                text_inputs = {k: v.to(clip_device) for k, v in text_inputs.items()}
+                with torch.no_grad():
+                    text_features = clip_model_openai.get_text_features(**text_inputs)
+                    text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+                    cached_target_text_features = text_features
+                    cached_target_prompt = prompt
+                    get_clip_score.last_model_type = "clip"
+                    
+            image_inputs = clip_processor_openai(images=[image], return_tensors="pt")
+            image_inputs = {k: v.to(clip_device) for k, v in image_inputs.items()}
+            with torch.no_grad():
+                image_features = clip_model_openai.get_image_features(**image_inputs)
+                image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+                
+                logit_scale = clip_model_openai.logit_scale.exp().item()
+                raw_similarity = (image_features @ cached_target_text_features.T).item() * logit_scale
+                
+            return raw_similarity
+            
     except Exception as e:
         sys.stderr.write(f"[CLIP Inference Error] {e}\n")
         sys.stderr.flush()
@@ -432,11 +486,10 @@ def find_frontiers() -> list:
 # ─────────────────────────────────────────────────────────────────────────────
 # Proportional Local Heading Waypoint Follower
 # ─────────────────────────────────────────────────────────────────────────────
-def move_towards_waypoint(waypoint_pt, only_rotate=False) -> bool:
+def move_towards_waypoint(waypoint_pt, only_rotate=False, fine_align=False) -> bool:
     """
     Realistic Local projected 2D proportional heading controller:
-    - Operate purely on ground plane to avoid vertical 3D leaks.
-    - Rotate agent if heading deviation is > 15 degrees.
+    - Rotate agent if heading deviation is > 15 degrees (or > 2.5 degrees if fine_align).
     - Move forward once aligned.
     - only_rotate: If True, only rotate to face target, never move forward (avoids wall-crashing).
     Returns True if waypoint is reached or successfully aligned.
@@ -459,30 +512,43 @@ def move_towards_waypoint(waypoint_pt, only_rotate=False) -> bool:
     else:
         qw, qx, qy, qz = rot_q[0], rot_q[1], rot_q[2], rot_q[3]
     
-    # Mathematical yaw computation purely around vertical Y-axis
-    yaw = 2 * math.atan2(qy, qw)
-    cos_y = math.cos(yaw)
-    sin_y = math.sin(yaw)
+    # Construct complete 3D rotation matrix R from quaternion to handle any pitch/roll tilt robustly
+    R = np.array([
+        [1-2*(qy**2+qz**2), 2*(qx*qy-qw*qz), 2*(qx*qz+qw*qy)],
+        [2*(qx*qy+qw*qz), 1-2*(qx**2+qz**2), 2*(qy*qz-qw*qx)],
+        [2*(qx*qz-qw*qy), 2*(qy*qz+qw*qx), 1-2*(qx**2+qy**2)]
+    ], dtype=np.float32)
     
-    # Project X-Z offset onto agent's local forward/right axes
-    # In Habitat, straight ahead is -Z, right is +X
-    # forward_dir = [-sin_y, 0, -cos_y], right_dir = [cos_y, 0, -sin_y]
-    v_forward = -vec_world[0] * sin_y - vec_world[2] * cos_y
-    v_right = vec_world[0] * cos_y - vec_world[2] * sin_y
+    # Project the 3D world offset onto the agent's local camera frame using transpose of R (inverse)
+    vec_local = R.T @ vec_world
+    
+    # Map to local forward and right directions based on simulator type
+    if sim_use_mock:
+        # In Mock simulator, straight ahead is +Z, right is +X
+        v_forward = vec_local[2]
+    else:
+        # In Habitat-Sim, straight ahead is -Z, right is +X
+        v_forward = -vec_local[2]
+        
+    v_right = vec_local[0]
     
     # Heading angle in local space
     # Positive is right (+X), negative is left (-X)
     local_angle = math.atan2(v_right, v_forward)
     
-    # Align rotation if angle deviation > 15 degrees
+    # Align rotation if angle deviation > 15 degrees (or > 2.5 degrees if fine_align)
+    threshold = math.radians(2.5) if fine_align else math.radians(15)
+    
     global last_action_taken
-    if abs(local_angle) > math.radians(15):
+    if abs(local_angle) > threshold:
         if local_angle > 0:
-            sim_execute("act", "turn_right")
-            last_action_taken = "turn_right"
+            action = "turn_right_fine" if fine_align else "turn_right"
+            sim_execute("act", action)
+            last_action_taken = action
         else:
-            sim_execute("act", "turn_left")
-            last_action_taken = "turn_left"
+            action = "turn_left_fine" if fine_align else "turn_left"
+            sim_execute("act", action)
+            last_action_taken = action
     else:
         if only_rotate:
             return True # Target aligned!
@@ -492,13 +558,14 @@ def move_towards_waypoint(waypoint_pt, only_rotate=False) -> bool:
     return False
 
 def perform_mini_spin(target: str, highest_conf_score: float, highest_conf_voxel):
-    """Perform a quick 360° mini-spin (6 steps of 60°) to scan the new area."""
+    """Perform a quick 360° mini-spin (24 steps of 15°) to scan the new area."""
     global current_frame_bytes
-    add_thinking("🔍 到达前沿，进行 360° 环境扫描...")
-    for spin_idx in range(6):
-        # 60 degrees turn is 2 turn_right calls
-        sim_execute("act", "turn_right")
-        sim_execute("act", "turn_right")
+    add_thinking("🔍 到达前沿，进行 360° 高频细粒度扫描...")
+    for spin_idx in range(24):
+        # 15 degrees turn is 3 turn_right_fine calls
+        sim_execute("act", "turn_right_fine")
+        sim_execute("act", "turn_right_fine")
+        sim_execute("act", "turn_right_fine")
         time.sleep(0.05)
         
         obs = sim_execute("observe")
@@ -546,12 +613,14 @@ def run_stanford_cow_navigation(target: str):
     2. FBE (Frontier-Based Exploration): Search for target if not locked.
     3. EXPLOIT (ROI lock): Direct path finding to highest confidence voxel.
     """
-    global voxel_graph, current_frame_bytes, recently_targeted_frontiers
+    global voxel_graph, current_frame_bytes, recently_targeted_frontiers, smoothed_clip_score
     
     add_thinking(f"🚀 开始具身导航，目标: {target.upper()}")
     
     # Reset navigation state
     recently_targeted_frontiers = []
+    smoothed_clip_score = 0.0
+    unreachable_target_voxels = set()
     with nav_state_lock:
         nav_state["status"] = "navigating"
         nav_state["destination"] = target
@@ -567,7 +636,7 @@ def run_stanford_cow_navigation(target: str):
     with voxel_lock:
         voxel_graph.clear()
         
-    add_thinking("[SPIN] 🤖 启动 360° 初始化环境扫描...")
+    add_thinking("[SPIN] 🤖 启动 360° 初始化高频环境扫描...")
     
     # ─────────────────────────────────────────────────────────────────────────
     # Phase 1: 360° SPIN Initialization
@@ -575,8 +644,11 @@ def run_stanford_cow_navigation(target: str):
     highest_conf_voxel = None
     highest_conf_score = 0.0
     
-    for spin_idx in range(12):
-        sim_execute("act", "turn_right")
+    for spin_idx in range(24):
+        # 15 degrees turn is 3 turn_right_fine calls
+        sim_execute("act", "turn_right_fine")
+        sim_execute("act", "turn_right_fine")
+        sim_execute("act", "turn_right_fine")
         time.sleep(0.1) # Small simulation settling sleep
         
         # Get sensor observations from simulator via main thread queue
@@ -606,7 +678,7 @@ def run_stanford_cow_navigation(target: str):
         if depth is not None:
             project_depth_to_voxels(rgb, depth, clip_score)
             
-        add_thinking(f"[SPIN Step {spin_idx+1}/12] 旋转扫描 {(spin_idx+1)*30}° | 当前 CLIP 置信度 = {clip_score:.2f}")
+        add_thinking(f"[SPIN Step {spin_idx+1}/24] 旋转扫描 {(spin_idx+1)*15}° | 当前 CLIP 置信度 = {clip_score:.2f}")
         
     # Check if target is located during SPIN
     with voxel_lock:
@@ -622,6 +694,10 @@ def run_stanford_cow_navigation(target: str):
                     
     add_thinking(f"[SPIN Done] 扫描完成。当前地图体素数量: {len(voxel_graph.nodes)}")
     
+    # Set step to 1 for the completed 360 SPIN initialization
+    with nav_state_lock:
+        nav_state["steps_walked"] = 1
+    
     # ─────────────────────────────────────────────────────────────────────────
     # Phase 2: Main Search & Navigate Loop (FBE / EXPLOIT)
     # ─────────────────────────────────────────────────────────────────────────
@@ -633,7 +709,7 @@ def run_stanford_cow_navigation(target: str):
     with nav_state_lock:
         max_steps = nav_state.get("max_steps", 250)
         
-    for step in range(1, max_steps + 1):
+    for step in range(2, max_steps + 1):
         # Check for user-requested abort
         with nav_state_lock:
             if nav_state.get("abort_requested", False):
@@ -696,9 +772,13 @@ def run_stanford_cow_navigation(target: str):
             project_depth_to_voxels(rgb, depth, clip_score)
             
         # Update best localized target
+        highest_conf_score = 0.0
+        highest_conf_voxel = None
         with voxel_lock:
             for node in voxel_graph.nodes:
                 if voxel_graph.nodes[node]["voxel_type"] == 2:
+                    if node in unreachable_target_voxels:
+                        continue
                     score = voxel_graph.nodes[node].get("obj_conf", 0.0)
                     if score > highest_conf_score:
                         highest_conf_score = score
@@ -738,15 +818,50 @@ def run_stanford_cow_navigation(target: str):
             voxel_pos_world = np.array([highest_conf_voxel[0] * VOXEL_SIZE_M, pos[1], highest_conf_voxel[1] * VOXEL_SIZE_M])
             dist_to_target = np.linalg.norm((voxel_pos_world - pos)[[0, 2]])
             
-            add_thinking(f"[EXPLOIT] 🎯 目标锁定！置信度 = {highest_conf_score:.2f} | 距离 = {dist_to_target:.2f}m")
+            add_thinking(f"[EXPLOIT] 🎯 目标锁定！当前置信度 = {clip_score:.2f} (地图峰值 = {highest_conf_score:.2f}) | 距离 = {dist_to_target:.2f}m")
             
             if dist_to_target < 1.2:
                 # Close enough! Turn to face the target and complete navigation (rotation only)
                 add_thinking("✓ 已到达目标附近！正在调整视角对准目标...")
-                for _ in range(15):
-                    aligned = move_towards_waypoint(voxel_pos_world, only_rotate=True)
+                
+                # Compute centroid of high-confidence voxels representing the target object around highest_conf_voxel
+                with voxel_lock:
+                    target_voxels = []
+                    for node in voxel_graph.nodes:
+                        if voxel_graph.nodes[node]["voxel_type"] == 2:
+                            d = math.sqrt((node[0] - highest_conf_voxel[0])**2 + (node[1] - highest_conf_voxel[1])**2) * VOXEL_SIZE_M
+                            if d <= 2.0 and voxel_graph.nodes[node].get("obj_conf", 0.0) >= (highest_conf_score - 3.0):
+                                target_voxels.append(node)
                     
-                    # Update live frame buffer and real-time CLIP score during rotation
+                    if target_voxels:
+                        avg_x = sum(n[0] for n in target_voxels) / len(target_voxels)
+                        avg_z = sum(n[1] for n in target_voxels) / len(target_voxels)
+                        target_center_world = np.array([avg_x * VOXEL_SIZE_M, pos[1], avg_z * VOXEL_SIZE_M])
+                    else:
+                        target_center_world = voxel_pos_world
+                
+                # Stage 1: Coarse Alignment (30° big steps, down to 15° tolerance)
+                add_thinking("🧭 [粗对齐阶段] 正在大步长快速转向目标...")
+                for _ in range(15):
+                    aligned = move_towards_waypoint(target_center_world, only_rotate=True, fine_align=False)
+                    
+                    obs = sim_execute("observe")
+                    rgb = obs.get("rgb")
+                    if rgb is not None:
+                        rgb_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGBA2BGR)
+                        ret, jpg_img = cv2.imencode('.jpg', rgb_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                        if ret:
+                            with frame_lock:
+                                current_frame_bytes = jpg_img.tobytes()
+                    if aligned:
+                        break
+                    time.sleep(0.05)
+                
+                # Stage 2: Fine Alignment (5° fine steps, down to 2.5° tolerance)
+                add_thinking("🎯 [精对齐阶段] 正在小步长高精度锁定中心...")
+                for _ in range(15):
+                    aligned = move_towards_waypoint(target_center_world, only_rotate=True, fine_align=True)
+                    
                     obs = sim_execute("observe")
                     rgb = obs.get("rgb")
                     if rgb is not None:
@@ -757,12 +872,11 @@ def run_stanford_cow_navigation(target: str):
                                 current_frame_bytes = jpg_img.tobytes()
                         
                         pil_img = Image.fromarray(rgb[:, :, :3])
-                        clip_score = get_clip_score(pil_img, target)
+                        clip_score = get_clip_score(pil_img, target, alpha=1.0)
                         with nav_state_lock:
                             nav_state["current_clip_score"] = float(clip_score)
                             if float(clip_score) > nav_state["highest_conf_score"]:
                                 nav_state["highest_conf_score"] = float(clip_score)
-                                
                     if aligned:
                         break
                     time.sleep(0.05)
@@ -798,8 +912,25 @@ def run_stanford_cow_navigation(target: str):
                             add_thinking("📍 规划直达目标邻近FREE点路径")
                         else:
                             add_thinking("⚠️ 直达路径不可达，转为避障探索模式...")
+                            if highest_conf_voxel is not None:
+                                # Blacklist all target voxels within a 2.0m radius of the unreachable target
+                                with voxel_lock:
+                                    for node in list(voxel_graph.nodes):
+                                        if voxel_graph.nodes[node]["voxel_type"] == 2:
+                                            dist = math.sqrt((node[0] - highest_conf_voxel[0])**2 + (node[1] - highest_conf_voxel[1])**2) * VOXEL_SIZE_M
+                                            if dist <= 2.0:
+                                                unreachable_target_voxels.add(node)
                             target_locked = False # Fall back to exploration
                     else:
+                        add_thinking("⚠️ 无可用邻近FREE点且直达路径不可达，转为避障探索模式...")
+                        if highest_conf_voxel is not None:
+                            # Blacklist all target voxels within a 2.0m radius of the unreachable target
+                            with voxel_lock:
+                                for node in list(voxel_graph.nodes):
+                                    if voxel_graph.nodes[node]["voxel_type"] == 2:
+                                        dist = math.sqrt((node[0] - highest_conf_voxel[0])**2 + (node[1] - highest_conf_voxel[1])**2) * VOXEL_SIZE_M
+                                        if dist <= 2.0:
+                                            unreachable_target_voxels.add(node)
                         target_locked = False
                         
         if not target_locked:
@@ -808,7 +939,7 @@ def run_stanford_cow_navigation(target: str):
                 nav_state["mode"] = "EXPLORE"
                 
             frontiers = find_frontiers()
-            add_thinking(f"[EXPLORE] 🔍 置信度 = {highest_conf_score:.2f} < {ARRIVE} | 当前可用前沿点 = {len(frontiers)}")
+            add_thinking(f"[EXPLORE] 🔍 当前置信度 = {clip_score:.2f} (地图峰值 = {highest_conf_score:.2f}) | 当前可用前沿点 = {len(frontiers)}")
             
             if not frontiers:
                 add_thinking("⚠️ 未检测到有效前沿点，执行原地随机旋转扫寻...")
@@ -818,27 +949,39 @@ def run_stanford_cow_navigation(target: str):
                 
             # If no path, request path to nearest frontier
             if not active_path_points or current_waypoint_idx >= len(active_path_points):
+                did_mini_spin = False
                 # We arrived at a frontier! Perform a 6-step mini-spin to scan the newly discovered room in all directions.
-                highest_conf_score, highest_conf_voxel = perform_mini_spin(target, highest_conf_score, highest_conf_voxel)
-                if highest_conf_score >= ARRIVE:
-                    # Target locked during the mini-spin! Skip planning next frontier and lock on!
-                    active_path_points = []
-                    continue
+                if active_path_points and current_waypoint_idx >= len(active_path_points):
+                    unreachable_target_voxels.clear()  # Clear blacklisted target voxels ONLY upon arrival at a new frontier!
+                    highest_conf_score, highest_conf_voxel = perform_mini_spin(target, highest_conf_score, highest_conf_voxel)
+                    did_mini_spin = True
+                    if highest_conf_score >= ARRIVE:
+                        # Target locked during the mini-spin! Skip planning next frontier and lock on!
+                        active_path_points = []
+                        continue
                 
-                target_frontier = frontiers[0]
-                frontier_world = np.array([target_frontier[0] * VOXEL_SIZE_M, pos[1], target_frontier[1] * VOXEL_SIZE_M])
-                path_points = sim_execute("find_path", frontier_world)
-                if path_points and len(path_points) > 1:
-                    active_path_points = path_points
-                    current_waypoint_idx = 1
-                    recently_targeted_frontiers.append(target_frontier)
-                    if len(recently_targeted_frontiers) > 8:
-                        recently_targeted_frontiers.pop(0)
-                    add_thinking(f"🗺️ 规划前沿探索路径，朝向体素: {target_frontier}")
-                else:
+                path_points = None
+                for target_frontier in frontiers[:15]:
+                    frontier_world = np.array([target_frontier[0] * VOXEL_SIZE_M, pos[1], target_frontier[1] * VOXEL_SIZE_M])
+                    path_points = sim_execute("find_path", frontier_world)
+                    if path_points and len(path_points) > 1:
+                        active_path_points = path_points
+                        current_waypoint_idx = 1
+                        recently_targeted_frontiers.append(target_frontier)
+                        if len(recently_targeted_frontiers) > 8:
+                            recently_targeted_frontiers.pop(0)
+                        add_thinking(f"🗺️ 规划前沿探索路径，朝向体素: {target_frontier}")
+                        break
+                
+                if not path_points or len(path_points) <= 1:
                     # Random turning to search for another frontier
                     sim_execute("act", "turn_left")
                     active_path_points = []
+                    continue
+                
+                if did_mini_spin:
+                    # The mini-spin is completed and next frontier path is planned.
+                    # End this step iteration here so the spin counts as exactly 1 step!
                     continue
                     
         # Execute movement towards next path waypoint
@@ -854,7 +997,7 @@ def run_stanford_cow_navigation(target: str):
     # Phase 3: Fallback (If ARRIVE threshold never met, head to best candidate)
     # ─────────────────────────────────────────────────────────────────────────
     if highest_conf_voxel is not None and highest_conf_score > 15.0:
-        add_thinking(f"⚠️ 达到最大搜索步数！采取最佳候选方案，直奔置信度最高的目标 (置信度={highest_conf_score:.2f})")
+        add_thinking(f"⚠️ 达到最大搜索步数！采取最佳候选方案，直奔置信度最高的目标 (当前置信度={clip_score:.2f}, 地图峰值={highest_conf_score:.2f})")
         
         # Candidate target might be an obstacle. Find a nearby FREE voxel to navigate to.
         with voxel_lock:
@@ -892,11 +1035,45 @@ def run_stanford_cow_navigation(target: str):
             
             if dist < 1.3:
                 add_thinking("✓ 到达最佳候选物体附近！正在调整视角对准目标...")
-                cand_pos_world = np.array([highest_conf_voxel[0] * VOXEL_SIZE_M, pos[1], highest_conf_voxel[1] * VOXEL_SIZE_M])
-                for _ in range(15):
-                    aligned = move_towards_waypoint(cand_pos_world, only_rotate=True)
+                
+                # Compute centroid of candidate high-confidence voxels representing the target object
+                with voxel_lock:
+                    cand_voxels = []
+                    for node in voxel_graph.nodes:
+                        if voxel_graph.nodes[node]["voxel_type"] == 2:
+                            d = math.sqrt((node[0] - highest_conf_voxel[0])**2 + (node[1] - highest_conf_voxel[1])**2) * VOXEL_SIZE_M
+                            if d <= 2.0 and voxel_graph.nodes[node].get("obj_conf", 0.0) >= (highest_conf_score - 3.0):
+                                cand_voxels.append(node)
                     
-                    # Update live frame buffer and real-time CLIP score during final pivot alignment
+                    if cand_voxels:
+                        avg_x = sum(n[0] for n in cand_voxels) / len(cand_voxels)
+                        avg_z = sum(n[1] for n in cand_voxels) / len(cand_voxels)
+                        cand_pos_world = np.array([avg_x * VOXEL_SIZE_M, pos[1], avg_z * VOXEL_SIZE_M])
+                    else:
+                        cand_pos_world = np.array([highest_conf_voxel[0] * VOXEL_SIZE_M, pos[1], highest_conf_voxel[1] * VOXEL_SIZE_M])
+                
+                # Stage 1: Coarse Alignment (30° big steps, down to 15° tolerance)
+                add_thinking("🧭 [粗对齐阶段] 正在大步长快速转向目标...")
+                for _ in range(15):
+                    aligned = move_towards_waypoint(cand_pos_world, only_rotate=True, fine_align=False)
+                    
+                    obs_align = sim_execute("observe")
+                    rgb_align = obs_align.get("rgb")
+                    if rgb_align is not None:
+                        rgb_bgr = cv2.cvtColor(rgb_align, cv2.COLOR_RGBA2BGR)
+                        ret, jpg_img = cv2.imencode('.jpg', rgb_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                        if ret:
+                            with frame_lock:
+                                current_frame_bytes = jpg_img.tobytes()
+                    if aligned:
+                        break
+                    time.sleep(0.05)
+                
+                # Stage 2: Fine Alignment (5° fine steps, down to 2.5° tolerance)
+                add_thinking("🎯 [精对齐阶段] 正在小步长高精度锁定中心...")
+                for _ in range(15):
+                    aligned = move_towards_waypoint(cand_pos_world, only_rotate=True, fine_align=True)
+                    
                     obs_align = sim_execute("observe")
                     rgb_align = obs_align.get("rgb")
                     if rgb_align is not None:
@@ -906,7 +1083,7 @@ def run_stanford_cow_navigation(target: str):
                             with frame_lock:
                                 current_frame_bytes = jpg_img.tobytes()
                         pil_img = Image.fromarray(rgb_align[:, :, :3])
-                        clip_score = get_clip_score(pil_img, target)
+                        clip_score = get_clip_score(pil_img, target, alpha=1.0)
                         with nav_state_lock:
                             nav_state["current_clip_score"] = float(clip_score)
                             if float(clip_score) > nav_state["highest_conf_score"]:
@@ -982,6 +1159,8 @@ def api_health():
 @app.route("/api/scan", methods=["POST"])
 def api_scan():
     """Trigger a CLIP scan to find target direction (for compatibility with integration tests)."""
+    global smoothed_clip_score
+    smoothed_clip_score = 0.0
     data = request.get_json() or {}
     target = data.get("target", "sofa")
     
@@ -1151,23 +1330,19 @@ def api_navigate():
         err_code = nav_state["error_code"]
         pos = nav_state["position"]
         steps = nav_state["steps_walked"]
+        highest_conf = nav_state["highest_conf_score"]
         
-    if success and arrived:
-        return jsonify({
-            "success": True,
-            "arrived": True,
-            "target": destination,
-            "arrived_position": pos,
-            "path_length": steps * 0.25, # Estimate path length
-            "message": "已到达目标附近"
-        })
-    else:
-        return jsonify({
-            "success": False,
-            "arrived": False,
-            "code": err_code or "NAV_FAILED",
-            "error": err_msg or "导航异常终止"
-        })
+    return jsonify({
+        "success": success and arrived,
+        "arrived": arrived,
+        "target": destination,
+        "arrived_position": pos,
+        "steps": steps,
+        "highest_conf": highest_conf,
+        "path_length": steps * 0.25,
+        "error": err_msg if not arrived else None,
+        "code": err_code if not arrived else None
+    })
 
 @app.route("/api/reset", methods=["POST"])
 def api_reset():
@@ -1183,6 +1358,38 @@ def api_reset():
         return jsonify({"success": True, "position": res["position"]})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
+
+@app.route("/api/teleport", methods=["POST"])
+def api_teleport():
+    """Teleport agent to a specific coordinate [x, y, z] and rotation [w, x, y, z] for benchmarking."""
+    data = request.get_json() or {}
+    position = data.get("position")
+    rotation = data.get("rotation", [1.0, 0.0, 0.0, 0.0]) # Default rotation [w, x, y, z]
+    if position is None:
+        return jsonify({"success": False, "error": "Missing position parameter"}), 400
+    try:
+        res = sim_execute("teleport", position, rotation)
+        with nav_state_lock:
+            nav_state["status"] = "idle"
+            nav_state["thinking_logs"] = []
+            nav_state["steps_walked"] = 0
+            nav_state["arrived"] = False
+        add_thinking(f"🏠 智能体已传送至指定点: {position}。")
+        return jsonify({"success": True, "position": res["position"]})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route("/api/config", methods=["POST"])
+def api_config():
+    """Dynamically configure the active model type and score arrival threshold."""
+    global MODEL_TYPE, ARRIVE
+    data = request.get_json() or {}
+    if "model_type" in data:
+        MODEL_TYPE = data["model_type"].lower()
+    if "arrive_threshold" in data:
+        ARRIVE = float(data["arrive_threshold"])
+    add_thinking(f"⚙️ 系统配置已更新: MODEL_TYPE={MODEL_TYPE}, ARRIVE={ARRIVE}")
+    return jsonify({"success": True, "model_type": MODEL_TYPE, "arrive_threshold": ARRIVE})
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Main Thread Simulator Runner Loop
@@ -1224,6 +1431,8 @@ def run_main_thread_simulator_loop():
             "move_forward": habitat_sim.ActionSpec("move_forward", habitat_sim.ActuationSpec(amount=0.25)),
             "turn_left": habitat_sim.ActionSpec("turn_left", habitat_sim.ActuationSpec(amount=30.0)),
             "turn_right": habitat_sim.ActionSpec("turn_right", habitat_sim.ActuationSpec(amount=30.0)),
+            "turn_left_fine": habitat_sim.ActionSpec("turn_left", habitat_sim.ActuationSpec(amount=5.0)),
+            "turn_right_fine": habitat_sim.ActionSpec("turn_right", habitat_sim.ActuationSpec(amount=5.0)),
         }
         
         # RGB camera sensor specification
@@ -1348,6 +1557,17 @@ def run_main_thread_simulator_loop():
                     st.rotation = [0, 0, 0, 1]
                     agent.set_state(st)
                 res = {"position": list(rnd)}
+            elif cmd == "teleport":
+                pos = args[0]
+                rot = args[1]
+                if sim_use_mock:
+                    sim.set_agent_position(pos)
+                else:
+                    st = habitat_sim.AgentState()
+                    st.position = pos
+                    st.rotation = [rot[1], rot[2], rot[3], rot[0]] # [x, y, z, w]
+                    agent.set_state(st)
+                res = {"position": pos}
             elif cmd == "change_scene":
                 new_scene_key = args[0]
                 base_dir = os.path.expanduser("~/.habitat-data/versioned_data/habitat_test_scenes")
@@ -1376,6 +1596,8 @@ def run_main_thread_simulator_loop():
                         "move_forward": habitat_sim.ActionSpec("move_forward", habitat_sim.ActuationSpec(amount=0.25)),
                         "turn_left": habitat_sim.ActionSpec("turn_left", habitat_sim.ActuationSpec(amount=30.0)),
                         "turn_right": habitat_sim.ActionSpec("turn_right", habitat_sim.ActuationSpec(amount=30.0)),
+                        "turn_left_fine": habitat_sim.ActionSpec("turn_left", habitat_sim.ActuationSpec(amount=5.0)),
+                        "turn_right_fine": habitat_sim.ActionSpec("turn_right", habitat_sim.ActuationSpec(amount=5.0)),
                     }
                     
                     rgb_sensor = habitat_sim.CameraSensorSpec()
@@ -1440,12 +1662,21 @@ def run_main_thread_simulator_loop():
                     res = [list(sim.get_agent_state().position), list(target_pt)]
                 else:
                     path = habitat_sim.ShortestPath()
-                    path.requested_start = agent.get_state().position
-                    path.requested_end = list(target_pt)
+                    # Snap start and end points to the closest navigable mesh positions to prevent pathfinding failures
+                    snapped_start = sim.pathfinder.snap_point(agent.get_state().position)
+                    snapped_end = sim.pathfinder.snap_point(list(target_pt))
+                    path.requested_start = snapped_start
+                    path.requested_end = snapped_end
                     if sim.pathfinder.find_path(path):
                         res = [list(p) for p in path.points]
                     else:
-                        res = []
+                        # Fallback to raw unsnapped path planning
+                        path.requested_start = agent.get_state().position
+                        path.requested_end = list(target_pt)
+                        if sim.pathfinder.find_path(path):
+                            res = [list(p) for p in path.points]
+                        else:
+                            res = []
                         
             sim_response_queue.put(res)
         except Exception as e:

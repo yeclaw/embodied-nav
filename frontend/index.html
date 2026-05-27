@@ -187,8 +187,8 @@
               <span id="stepCount" class="text-slate-200 font-semibold">0 / 250</span>
             </div>
             <div class="flex justify-between border-b border-slate-800 pb-2">
-              <span class="text-slate-400">CLIP ALIGNMENT</span>
-              <span class="text-indigo-400 font-semibold">openai/clip-vit-base</span>
+              <span class="text-slate-400">SIGLIP ALIGNMENT</span>
+              <span class="text-indigo-400 font-semibold">google/siglip-base</span>
             </div>
             <!-- Dynamic Real-Time CLIP Diagnostics -->
             <div class="border-b border-slate-800 pb-2 flex flex-col gap-1.5">
@@ -303,14 +303,16 @@
       © 2026 Embodied Intelligence Project | Stanford COW (CLIP on Wheels) Core
     </div>
     <div class="flex gap-4">
-      <span>PERCEPTION: CLIP-ViT-B32</span>
+      <span>PERCEPTION: SigLIP-Base</span>
       <span>ACTUATION: ActionSpec (amount=0.25)</span>
       <span>SCENE: apartment_1.glb</span>
     </div>
   </footer>
 
   <script>
-    const FLASK_BASE = "http://127.0.0.1:5001";
+    const FLASK_BASE = (window.location.origin && window.location.origin !== "null" && window.location.origin.startsWith("http"))
+      ? window.location.origin
+      : "http://127.0.0.1:5001";
     let isNavigating = false;
     let pollInterval = null;
 

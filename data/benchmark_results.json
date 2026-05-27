@@ -1,0 +1,66 @@
+{
+    "siglip": {
+        "sofa": {
+            "arrived": true,
+            "steps": 68,
+            "highest_conf": 28.21767387608984,
+            "time_s": 3.7686281204223633
+        },
+        "television": {
+            "arrived": true,
+            "steps": 60,
+            "highest_conf": 26.45691574029133,
+            "time_s": 12.6840341091156
+        },
+        "dining_table": {
+            "arrived": false,
+            "steps": 250,
+            "highest_conf": 19.506964563191964,
+            "time_s": 55.28086018562317
+        },
+        "chair": {
+            "arrived": true,
+            "steps": 70,
+            "highest_conf": 25.429545963333894,
+            "time_s": 6.770519018173218
+        },
+        "exit": {
+            "arrived": false,
+            "steps": 250,
+            "highest_conf": 28.61218549163684,
+            "time_s": 59.66830587387085
+        }
+    },
+    "clip": {
+        "sofa": {
+            "arrived": true,
+            "steps": 96,
+            "highest_conf": 27.619963011357186,
+            "time_s": 9.253841161727905
+        },
+        "television": {
+            "arrived": true,
+            "steps": 72,
+            "highest_conf": 28.02327489076788,
+            "time_s": 3.1700592041015625
+        },
+        "dining_table": {
+            "arrived": false,
+            "steps": 250,
+            "highest_conf": 25.722243364123642,
+            "time_s": 38.92118787765503
+        },
+        "chair": {
+            "arrived": true,
+            "steps": 95,
+            "highest_conf": 28.194882636633338,
+            "time_s": 5.878986120223999
+        },
+        "exit": {
+            "arrived": false,
+            "steps": 250,
+            "highest_conf": 27.183755325985203,
+            "time_s": 4.229681730270386
+        }
+    }
+}

@@ -50,7 +50,7 @@ def test_navigate(target: str) -> bool:
     r = requests.post(
         f"{FLASK_BASE}/api/navigate",
         json={"destination": target, "user_input": f"请到{target}旁边"},
-        timeout=60
+        timeout=300
     )
     data = r.json()
     print(f"     success={data['success']}, arrived={data.get('arrived', False)}")

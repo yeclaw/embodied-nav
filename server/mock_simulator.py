@@ -70,6 +70,12 @@ class MockSimulator:
             elif action == "turn_right":
                 # Rotate 30 degrees CW (negative)
                 yaw -= math.radians(30)
+            elif action == "turn_left_fine":
+                # Rotate 5 degrees CCW (positive)
+                yaw += math.radians(5)
+            elif action == "turn_right_fine":
+                # Rotate 5 degrees CW (negative)
+                yaw -= math.radians(5)
                 
             self._agent_state["yaw"] = yaw
             

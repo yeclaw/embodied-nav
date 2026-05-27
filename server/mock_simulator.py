@@ -20,8 +20,13 @@ class MockAgentState:
 
 class MockAgent:
     """Mock agent, API-compatible."""
-    def __init__(self, agent_id: int = 0):
+    def __init__(self, simulator, agent_id: int = 0):
         self.agent_id = agent_id
+        self.simulator = simulator
+
+    def act(self, action: str) -> bool:
+        """Execute action on mock simulator agent."""
+        return self.simulator.act(action)
 
 
 class MockSimulator:
@@ -50,6 +55,32 @@ class MockSimulator:
             position=self._agent_state["position"],
             rotation=self._agent_state["rotation"],
         )
+
+    def act(self, action: str) -> bool:
+        """Execute movement or rotation action on the mock agent."""
+        with self._lock:
+            yaw = self._agent_state["yaw"]
+            if action == "move_forward":
+                # Move 0.25m forward in X-Z plane
+                self._agent_state["position"][0] += 0.25 * math.sin(yaw)
+                self._agent_state["position"][2] += 0.25 * math.cos(yaw)
+            elif action == "turn_left":
+                # Rotate 30 degrees CCW (positive)
+                yaw += math.radians(30)
+            elif action == "turn_right":
+                # Rotate 30 degrees CW (negative)
+                yaw -= math.radians(30)
+                
+            self._agent_state["yaw"] = yaw
+            
+            # Update rotation quaternion [x, y, z, w]
+            self._agent_state["rotation"] = [
+                0.0,
+                math.sin(yaw / 2.0),
+                0.0,
+                math.cos(yaw / 2.0)
+            ]
+        return False # No collision
 
     def get_sensor_observations(self, agent_id: int = 0):
         """Return RGB observation (mock camera)."""
@@ -151,7 +182,7 @@ class MockSimulator:
 
         # HUD
         draw.rectangle([5, 5, 200, 45], fill=(0, 0, 0))
-        draw.text((8, 8), f"APARTMENT_0", fill=(0, 200, 100))
+        draw.text((8, 8), f"{self.scene_name.upper()}", fill=(0, 200, 100))
         pos = self._agent_state["position"]
         draw.text((8, 22), f"x={pos[0]:.1f} z={pos[2]:.1f}", fill=(150, 150, 150))
         draw.text((8, 36), f"yaw={math.degrees(agent_yaw):.0f}deg", fill=(150, 150, 150))
@@ -191,6 +222,27 @@ ROOM_TEMPLATES = {
             {"name": "desk", "pos": (1.0, 0.0, 1.0), "color": (100, 90, 70), "label": "DESK"},
             {"name": "exit", "pos": (4.5, 0.0, 4.5), "color": (60, 140, 60), "label": "EXIT"},
         ],
+    },
+    "apartment_1": {
+        "size": (640, 480),
+        "spawn": (6.1, -1.6, -0.6),
+        "objects": [
+            {"name": "sofa", "pos": (7.5, -1.6, 1.2), "color": (80, 100, 200), "label": "SOFA"},
+            {"name": "dining_table", "pos": (5.0, -1.6, -2.0), "color": (120, 80, 60), "label": "TABLE"},
+            {"name": "desk", "pos": (8.5, -1.6, -1.5), "color": (100, 90, 70), "label": "DESK"},
+            {"name": "exit", "pos": (3.5, -1.6, 2.5), "color": (60, 140, 60), "label": "EXIT"},
+        ],
+    },
+    "van_gogh": {
+        "size": (640, 480),
+        "spawn": (0.0, 0.0, 0.0),
+        "objects": [
+            {"name": "bed", "pos": (1.2, 0.0, 2.8), "color": (150, 100, 80), "label": "BED"},
+            {"name": "painting", "pos": (-1.5, 0.0, 2.0), "color": (220, 180, 80), "label": "PAINTING"},
+            {"name": "wooden_chair", "pos": (0.5, 0.0, 1.2), "color": (180, 130, 70), "label": "CHAIR"},
+            {"name": "desk", "pos": (-0.8, 0.0, 3.2), "color": (100, 90, 70), "label": "DESK"},
+            {"name": "exit", "pos": (2.2, 0.0, 0.5), "color": (60, 140, 60), "label": "EXIT"},
+        ],
     }
 }
 
@@ -198,5 +250,5 @@ ROOM_TEMPLATES = {
 def create_mock_simulator(scene_name: str = "apartment_0"):
     """Factory function — creates mock simulator."""
     sim = MockSimulator(scene_name)
-    agent = MockAgent(0)
+    agent = MockAgent(sim, 0)
     return sim, agent

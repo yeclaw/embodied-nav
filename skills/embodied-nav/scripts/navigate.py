@@ -31,7 +31,7 @@ def main():
     )
     parser.add_argument(
         "--base-url",
-        default=os.environ.get("FLASK_BASE_URL", "http://127.0.0.1:5000"),
+        default=os.environ.get("FLASK_BASE_URL", "http://127.0.0.1:5001"),
         help="Flask 后端 URL"
     )
     args = parser.parse_args()

@@ -10,7 +10,7 @@ metadata:
       env:
         FLASK_BASE_URL:
           description: "Flask backend URL"
-          default: "http://127.0.0.1:5000"
+          default: "http://127.0.0.1:5001"
 ---
 
 # Embodied Navigation Skill

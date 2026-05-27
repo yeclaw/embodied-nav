@@ -10,7 +10,7 @@ import sys
 import time
 import requests
 
-FLASK_BASE = "http://127.0.0.1:5000"
+FLASK_BASE = "http://127.0.0.1:5001"
 
 TARGETS = ["sofa", "bed", "dining_table", "desk", "exit"]
 

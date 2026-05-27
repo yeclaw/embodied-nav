@@ -3,143 +3,316 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>🤖 Embodied Navigation Agent</title>
+  <title>🤖 Embodied Navigation Agent Control Center</title>
+  <!-- Tailwind CSS v4 CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <!-- Google Fonts: Space Grotesk (headers) & Inter (body) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  
   <style>
-    .glow { box-shadow: 0 0 15px rgba(59, 130, 246, 0.5); }
-    .log-scroll::-webkit-scrollbar { width: 4px; }
-    .log-scroll::-webkit-scrollbar-track { background: #1e293b; }
-    .log-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: radial-gradient(circle at top right, #0b1329 0%, #030712 100%);
+    }
+    .font-display {
+      font-family: 'Space Grotesk', sans-serif;
+    }
+    .font-mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    /* Glows & Glassmorphism */
+    .glass-card {
+      background: rgba(15, 23, 42, 0.45);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    }
+    .glow-blue {
+      box-shadow: 0 0 25px rgba(59, 130, 246, 0.25);
+    }
+    .glow-emerald {
+      box-shadow: 0 0 25px rgba(16, 185, 129, 0.25);
+    }
+    .text-glow-blue {
+      text-shadow: 0 0 10px rgba(59, 130, 246, 0.6);
+    }
+    .text-glow-emerald {
+      text-shadow: 0 0 10px rgba(16, 185, 129, 0.6);
+    }
+    
+    /* Scrollbars */
+    .custom-scroll::-webkit-scrollbar {
+      width: 5px;
+    }
+    .custom-scroll::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.6);
+    }
+    .custom-scroll::-webkit-scrollbar-thumb {
+      background: rgba(100, 116, 139, 0.4);
+      border-radius: 4px;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb:hover {
+      background: rgba(148, 163, 184, 0.6);
+    }
+
+    /* Radar Scanning Effect */
+    @keyframes radar-scan {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .radar-sweep {
+      background: conic-gradient(from 0deg at 50% 50%, rgba(59, 130, 246, 0.15) 0deg, rgba(59, 130, 246, 0) 90deg, rgba(59, 130, 246, 0) 360deg);
+      animation: radar-scan 4s linear infinite;
+    }
+    
+    /* Pulsing animations */
     @keyframes pulse-ring {
-      0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
-      70% { box-shadow: 0 0 0 8px rgba(59, 130, 246, 0); }
-      100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.05); opacity: 0.4; }
+      100% { transform: scale(0.95); opacity: 0.8; }
     }
-    .pulse-ring { animation: pulse-ring 1.5s ease-out infinite; }
-    @keyframes typing {
-      from { width: 0; }
-      to { width: 100%; }
+    .pulse-glow {
+      animation: pulse-ring 2s ease-in-out infinite;
     }
-    .typing { overflow: hidden; white-space: nowrap; animation: typing 1s steps(20, end); }
+    
+    /* Log prefix styling */
+    .log-info { color: #94a3b8; }
+    .log-spin { color: #a78bfa; font-weight: 500; }
+    .log-explore { color: #f59e0b; font-weight: 500; }
+    .log-exploit { color: #f43f5e; font-weight: 600; }
+    .log-success { color: #10b981; font-weight: 600; text-shadow: 0 0 8px rgba(16, 185, 129, 0.4); }
+    .log-error { color: #ef4444; font-weight: 600; }
   </style>
 </head>
-<body class="bg-slate-950 text-slate-100 font-sans min-h-screen">
+<body class="text-slate-100 min-h-screen flex flex-col selection:bg-blue-500/30 selection:text-blue-200">
 
   <!-- Header -->
-  <header class="border-b border-slate-800 pb-4 mb-6 px-6 pt-6 flex justify-between items-center">
+  <header class="border-b border-slate-800/80 px-8 py-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-950/60 backdrop-blur-md">
     <div>
-      <h1 class="text-2xl font-bold text-blue-400 tracking-wide">🤖 Embodied Navigation Agent</h1>
-      <p class="text-xs text-slate-400 mt-1">基于 Habitat-Sim + CLIP + OpenClaw 的具身导航系统 · M1 Pro 运行</p>
+      <div class="flex items-center gap-3">
+        <span class="flex h-3 w-3 relative">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+          <span class="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
+        </span>
+        <h1 class="text-2xl font-bold font-display tracking-wider bg-gradient-to-r from-blue-400 via-indigo-300 to-emerald-400 bg-clip-text text-transparent">
+          🤖 EMBODIED NAV-COW AGENT
+        </h1>
+      </div>
+      <p class="text-xs text-slate-400 mt-1 font-mono">
+        SYSTEM STATE: <span id="sysStateHeader" class="text-blue-400">CONNECTING...</span> | SIMULATOR: <span id="simModeHeader" class="text-slate-300">HABITAT-SIM v0.3.3</span>
+      </p>
     </div>
-    <div class="flex gap-3 text-sm">
+    
+    <div class="flex items-center gap-3">
+      <!-- 3D Scene Selector Dropdown -->
+      <div class="flex items-center bg-slate-900/60 border border-slate-800/80 px-3 py-1.5 rounded-lg gap-2">
+        <label class="text-[10px] font-mono text-slate-400 font-semibold">3D SCENE:</label>
+        <select id="sceneSelect" onchange="switchScene(this.value)" class="bg-slate-950 border border-slate-700/60 text-xs font-semibold rounded px-2 py-1 focus:outline-none focus:border-blue-500 text-blue-400 cursor-pointer focus:ring-1 focus:ring-blue-500/30">
+          <option value="apartment_1">🏢 Modern Living Room</option>
+          <option value="van_gogh">🛏️ Van Gogh Bedroom</option>
+        </select>
+      </div>
       <a href="https://github.com" target="_blank" id="gh-link"
-         class="text-slate-400 hover:text-white transition border border-slate-700 px-3 py-1.5 rounded-lg">
-        📂 GitHub
+         class="font-display text-sm bg-slate-900/60 hover:bg-slate-800 border border-slate-700/80 hover:border-slate-500 px-4 py-2 rounded-lg transition-all duration-200 flex items-center gap-2">
+        <span>📂 GitHub Repository</span>
       </a>
+      <button onclick="resetSimulator()" class="font-display text-sm bg-red-950/40 hover:bg-red-900/40 border border-red-900/50 hover:border-red-600 px-4 py-2 rounded-lg text-red-300 transition-all duration-200 font-semibold cursor-pointer">
+        🔄 Reset Spawn
+      </button>
     </div>
   </header>
 
-  <!-- Main Layout -->
-  <main class="max-w-7xl mx-auto px-6 space-y-6">
+  <!-- Main Workspace -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
 
-    <!-- Row 1: Control + Video + Thought Chain -->
-    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- Column 1: Control Panel (Span 4) -->
+    <section class="lg:col-span-4 flex flex-col gap-6">
+      
+      <!-- Command Input -->
+      <div class="glass-card rounded-2xl p-5 flex flex-col relative overflow-hidden">
+        <div class="absolute -top-10 -left-10 w-24 h-24 bg-blue-500/10 rounded-full blur-2xl"></div>
+        
+        <h3 class="text-md font-semibold text-blue-300 font-display tracking-wide mb-4 flex items-center gap-2">
+          <span>🔮 具身智能指令控制台</span>
+        </h3>
 
-      <!-- Left: Control Panel -->
-      <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col">
-        <h3 class="text-lg font-semibold text-blue-300 mb-4">🔮 具身智能指令输入</h3>
-
-        <label class="block text-xs text-slate-400 mb-2">自然语言指令：</label>
-        <input id="cmdInput" type="text"
-               placeholder="例如：请到沙发旁边"
-               class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm
-                      focus:outline-none focus:border-blue-500 mb-4
-                      placeholder:text-slate-600">
+        <div class="relative mb-4">
+          <label class="block text-[11px] font-mono text-slate-400 mb-1.5">ENTER INSTRUCTION:</label>
+          <input id="cmdInput" type="text"
+                 placeholder="输入导航指令，例如：请到沙发旁边"
+                 class="w-full bg-slate-950/80 border border-slate-700/60 focus:border-blue-500 rounded-xl px-4 py-3 text-sm
+                        focus:outline-none transition-all duration-300 placeholder:text-slate-600 focus:ring-1 focus:ring-blue-500/30">
+        </div>
 
         <button id="submitBtn" onclick="submitCommand()"
-                class="w-full bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium
-                       py-2 rounded-lg transition mb-4">
-          ▶ 执行导航
+                class="w-full bg-blue-600 hover:bg-blue-500 border border-blue-500 hover:border-blue-400 text-white text-sm font-semibold
+                       py-3 rounded-xl transition-all duration-300 transform active:scale-[0.98] shadow-md shadow-blue-900/30 cursor-pointer">
+          🚀 执行具身导航
         </button>
 
-        <p class="text-xs text-slate-400 mb-2">快捷导航按钮：</p>
-        <div class="flex flex-wrap gap-2">
-          <button onclick="sendDest('sofa')" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-md transition cursor-pointer">🛋️ 沙发</button>
-          <button onclick="sendDest('bed')" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-md transition cursor-pointer">🛏️ 床</button>
-          <button onclick="sendDest('dining_table')" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-md transition cursor-pointer">🍽️ 餐桌</button>
-          <button onclick="sendDest('desk')" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-md transition cursor-pointer">💻 书桌</button>
-          <button onclick="sendDest('exit')" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-md transition cursor-pointer">🚪 门口</button>
-        </div>
-
-        <div class="mt-auto pt-4 border-t border-slate-800 space-y-1">
-          <div class="text-xs text-slate-400">仿真器状态：
-            <span id="simStatus" class="text-yellow-400 font-mono">⏳ 等待连接...</span>
-          </div>
-          <div class="text-xs text-slate-400">机器人位置：
-            <span id="agentPos" class="text-green-400 font-mono">—</span>
-          </div>
-          <div class="text-xs text-slate-400">特权信息：
-            <span class="text-emerald-400 font-mono">🔒 已禁用（纯视觉驱动）</span>
+        <div class="mt-5 border-t border-slate-800/80 pt-4">
+          <p class="text-[11px] font-mono text-slate-400 mb-2">QUICK SHORTCUTS:</p>
+          <div class="grid grid-cols-2 gap-2">
+            <button onclick="sendDest('sofa')" class="bg-slate-900/60 hover:bg-slate-800 border border-slate-800 hover:border-slate-600 text-xs py-2.5 rounded-lg transition-all duration-200 cursor-pointer flex items-center justify-center gap-1.5">🛋️ 沙发 (Sofa)</button>
+            <button onclick="sendDest('dining_table')" class="bg-slate-900/60 hover:bg-slate-800 border border-slate-800 hover:border-slate-600 text-xs py-2.5 rounded-lg transition-all duration-200 cursor-pointer flex items-center justify-center gap-1.5">🍽️ 餐桌 (Dining)</button>
+            <button onclick="sendDest('desk')" class="bg-slate-900/60 hover:bg-slate-800 border border-slate-800 hover:border-slate-600 text-xs py-2.5 rounded-lg transition-all duration-200 cursor-pointer flex items-center justify-center gap-1.5">💻 书桌 (Desk)</button>
+            <button onclick="sendDest('exit')" class="bg-slate-900/60 hover:bg-slate-800 border border-slate-800 hover:border-slate-600 text-xs py-2.5 rounded-lg transition-all duration-200 cursor-pointer flex items-center justify-center gap-1.5">🚪 门口 (Exit)</button>
           </div>
         </div>
       </div>
 
-      <!-- Center: Video Stream -->
-      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col items-center justify-center min-h-[360px] relative">
-        <div class="absolute top-3 left-4 bg-red-500/20 text-red-400 border border-red-500/30 text-[10px] uppercase font-mono px-2 py-0.5 rounded">
-          Simulator: Habitat-Sim
-        </div>
-        <img id="videoStream" src=""
-             class="w-full rounded-lg object-cover bg-slate-950"
-             style="min-height: 300px;"
-             onerror="videoError()">
-        <div id="videoPlaceholder" class="absolute inset-0 flex items-center justify-center flex-col gap-2 text-slate-500">
-          <div class="text-4xl">🤖</div>
-          <div class="text-sm">正在连接仿真器视频流...</div>
-          <div class="text-xs">确保 server/app.py 已启动</div>
-        </div>
-      </div>
+      <!-- Telemetry Data -->
+      <div class="glass-card rounded-2xl p-5 flex flex-col relative overflow-hidden flex-1">
+        <div class="absolute -bottom-10 -right-10 w-24 h-24 bg-emerald-500/10 rounded-full blur-2xl"></div>
+        
+        <h3 class="text-md font-semibold text-emerald-400 font-display tracking-wide mb-4">
+          📊 Robot Telemetry & Diagnostics
+        </h3>
+        
+        <div class="space-y-4 font-mono text-xs flex-1 flex flex-col justify-between">
+          <div class="space-y-3">
+            <div class="flex justify-between border-b border-slate-800 pb-2">
+              <span class="text-slate-400">AGENT MODE</span>
+              <span id="agentMode" class="text-blue-400 font-semibold">STANDBY</span>
+            </div>
+            <div class="flex justify-between border-b border-slate-800 pb-2">
+              <span class="text-slate-400">POSITION (X, Y, Z)</span>
+              <span id="agentPos" class="text-green-400 font-semibold">—</span>
+            </div>
+            <div class="flex justify-between border-b border-slate-800 pb-2">
+              <span class="text-slate-400">STEPS TAKEN</span>
+              <span id="stepCount" class="text-slate-200 font-semibold">0 / 250</span>
+            </div>
+            <div class="flex justify-between border-b border-slate-800 pb-2">
+              <span class="text-slate-400">CLIP ALIGNMENT</span>
+              <span class="text-indigo-400 font-semibold">openai/clip-vit-base</span>
+            </div>
+            <!-- Dynamic Real-Time CLIP Diagnostics -->
+            <div class="border-b border-slate-800 pb-2 flex flex-col gap-1.5">
+              <div class="flex justify-between">
+                <span class="text-slate-400">REAL-TIME MATCH SCORE</span>
+                <span id="clipScoreText" class="text-slate-400 font-semibold">—</span>
+              </div>
+              <div class="w-full bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-800/80 p-[1px]">
+                <div id="clipScoreBar" class="h-full bg-slate-700 w-0 rounded-full transition-all duration-300"></div>
+              </div>
+            </div>
+            <div class="flex justify-between border-b border-slate-800 pb-2">
+              <span class="text-slate-400">PEAK MAP CONFIDENCE</span>
+              <span id="peakScoreText" class="text-indigo-400 font-semibold">—</span>
+            </div>
+            <div class="flex justify-between border-b border-slate-800 pb-2">
+              <span class="text-slate-400">PRIVILEGED STATE</span>
+              <span class="text-emerald-400 font-semibold">DISABLED (Vision Only)</span>
+            </div>
+          </div>
 
-      <!-- Right: Log -->
-      <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col">
-        <div id="logConsole"
-             class="bg-slate-950 border border-slate-800 rounded-lg p-3 flex-1 font-mono text-xs
-                    text-green-400 overflow-y-auto log-scroll whitespace-pre-line leading-relaxed
-                    min-h-[200px] max-h-[300px]">
-          等待用户输入指令...
-
-        </div>
-        <div id="agentAsk"
-             class="mt-3 p-3 bg-blue-950/40 border border-blue-900/50 rounded text-sm text-blue-300 hidden">
-          🙋‍♂️ Agent: "任务已完成，请问您还需要什么？"
+          <!-- Radar Widget -->
+          <div class="mt-4 flex items-center gap-4 bg-slate-950/60 p-3.5 rounded-xl border border-slate-800/80">
+            <div class="relative w-12 h-12 rounded-full border border-blue-500/30 overflow-hidden flex items-center justify-center">
+              <div class="absolute inset-0 radar-sweep"></div>
+              <div class="w-1.5 h-1.5 bg-blue-400 rounded-full z-10 pulse-glow"></div>
+            </div>
+            <div>
+              <p class="text-xs font-semibold text-slate-200 font-display">Frontier Voxel Radar</p>
+              <p class="text-[10px] text-slate-400 mt-0.5">Scanning free frontiers...</p>
+            </div>
+          </div>
         </div>
       </div>
 
     </section>
 
-    <!-- Row 2: Status Bar + Info -->
-    <section class="bg-slate-900 border border-slate-800 rounded-xl p-5">
-      <div class="flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h3 class="text-sm font-semibold text-slate-200 mb-2">📋 系统说明</h3>
-          <p class="text-xs text-slate-400 max-w-2xl">
-            本系统基于纯视觉感知（CLIP）进行具身导航，不依赖任何特权信息（物体精确3D坐标）。
-            机器人通过摄像头捕获房间画面，由 CLIP 模型判断目标方向，再由 Habitat-Sim 路径规划器引导机器人到达目标位置。
-          </p>
+    <!-- Column 2: Live Stream Viewport (Span 5) -->
+    <section class="lg:col-span-5 flex flex-col gap-6">
+      <div class="glass-card rounded-2xl p-4 flex flex-col items-center justify-center min-h-[420px] relative overflow-hidden">
+        
+        <div class="absolute top-4 left-4 bg-slate-900/90 text-slate-300 border border-slate-700/60 text-[10px] font-mono px-3 py-1 rounded-full z-10 flex items-center gap-1.5 backdrop-blur-md">
+          <span class="h-2 w-2 rounded-full bg-red-500 animate-pulse"></span>
+          <span>LIVE FIRST-PERSON STREAM (MJPEG)</span>
         </div>
-        <div class="flex gap-4 text-xs text-slate-500">
-          <div>🏠 Replica apartment_0</div>
-          <div>📷 CLIP (CPU)</div>
-          <div>🧠 OpenClaw M2.7</div>
+        
+        <div class="absolute top-4 right-4 bg-slate-900/90 text-slate-300 border border-slate-700/60 text-[10px] font-mono px-3 py-1 rounded-full z-10 backdrop-blur-md">
+          <span>640 x 480 @ 15fps</span>
+        </div>
+        
+        <div class="w-full relative rounded-xl overflow-hidden border border-slate-800 bg-slate-950">
+          <img id="videoStream" src=""
+               class="w-full h-full object-cover"
+               style="min-height: 350px;"
+               onerror="videoError()">
+               
+          <div id="videoPlaceholder" class="absolute inset-0 flex items-center justify-center flex-col gap-3 text-slate-500 bg-slate-950">
+            <div class="text-5xl animate-bounce">🤖</div>
+            <div class="text-sm font-display text-slate-300">Connecting to Simulator Camera...</div>
+            <div class="text-xs font-mono text-slate-500">Ensure Flask backend app.py is running on port 5001</div>
+          </div>
+        </div>
+
+        <div class="w-full mt-3 flex justify-between items-center text-[10px] font-mono text-slate-500 px-1">
+          <span>HFOV: 90° | SENSOR: RGB-D PINHOLE</span>
+          <span class="text-blue-400/70">ENVIRONMENT: Replica apartment_1.glb</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Column 3: Thought Chain Log (Span 3) -->
+    <section class="lg:col-span-3 flex flex-col gap-6">
+      <div class="glass-card rounded-2xl p-5 flex flex-col h-full min-h-[420px] relative overflow-hidden">
+        <div class="absolute -top-10 -right-10 w-24 h-24 bg-purple-500/10 rounded-full blur-2xl"></div>
+        
+        <h3 class="text-md font-semibold text-purple-400 font-display tracking-wide mb-3 flex items-center gap-2">
+          <span>🧠 Agent Thought Chain Terminal</span>
+        </h3>
+        
+        <div id="logConsole"
+             class="bg-slate-950/80 border border-slate-900 rounded-xl p-4 flex-1 font-mono text-xs
+                    overflow-y-auto custom-scroll whitespace-pre-line leading-relaxed min-h-[300px] max-h-[450px]">
+          [SYSTEM] Initializing control dashboard...
+          [SYSTEM] Ready for destination request.
+        </div>
+
+        <!-- Pulser Popup "还需要什么" -->
+        <div id="agentAsk"
+             class="mt-4 p-4 bg-emerald-950/40 border border-emerald-800/40 rounded-xl text-xs text-emerald-300 glow-emerald transition-all duration-500 hidden">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="flex h-2 w-2 relative">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            <span class="font-display font-semibold text-emerald-200">🙋‍♂️ Agent Inquires:</span>
+          </div>
+          <p class="leading-relaxed mb-3">"任务已完成！请问您还需要我去哪个地点？"</p>
+          <div class="grid grid-cols-3 gap-1.5">
+            <button onclick="replyAgent('sofa')" class="bg-emerald-900/30 hover:bg-emerald-800/50 border border-emerald-800/40 px-2 py-1.5 rounded text-[10px] text-emerald-200 text-center cursor-pointer transition-all duration-200">🛋️ 去沙发</button>
+            <button onclick="replyAgent('dining_table')" class="bg-emerald-900/30 hover:bg-emerald-800/50 border border-emerald-800/40 px-2 py-1.5 rounded text-[10px] text-emerald-200 text-center cursor-pointer transition-all duration-200">🍽️ 去餐桌</button>
+            <button onclick="replyAgent('desk')" class="bg-emerald-900/30 hover:bg-emerald-800/50 border border-emerald-800/40 px-2 py-1.5 rounded text-[10px] text-emerald-200 text-center cursor-pointer transition-all duration-200">💻 去书桌</button>
+          </div>
         </div>
       </div>
     </section>
 
   </main>
 
+  <!-- Footer -->
+  <footer class="border-t border-slate-900 bg-slate-950/80 px-8 py-4 flex flex-col md:flex-row justify-between items-center text-xs text-slate-500 font-mono gap-2">
+    <div>
+      © 2026 Embodied Intelligence Project | Stanford COW (CLIP on Wheels) Core
+    </div>
+    <div class="flex gap-4">
+      <span>PERCEPTION: CLIP-ViT-B32</span>
+      <span>ACTUATION: ActionSpec (amount=0.25)</span>
+      <span>SCENE: apartment_1.glb</span>
+    </div>
+  </footer>
+
   <script>
     const FLASK_BASE = "http://127.0.0.1:5001";
     let isNavigating = false;
+    let pollInterval = null;
 
     // Start video stream
     document.getElementById('videoStream').src = FLASK_BASE + "/video_feed";
@@ -147,64 +320,190 @@
       document.getElementById('videoPlaceholder').style.display = 'none';
     };
 
-    // Poll status every 2s
-    setInterval(pollStatus, 2000);
+    let pollIntervalId = null;
+
+    function startDynamicPolling() {
+      if (pollIntervalId) clearInterval(pollIntervalId);
+      const rate = isNavigating ? 300 : 1500;
+      pollIntervalId = setInterval(pollStatus, rate);
+    }
+
+    pollStatus();
+    startDynamicPolling();
 
     function pollStatus() {
       fetch(FLASK_BASE + "/api/status")
         .then(r => r.json())
         .then(data => {
           const statusMap = {
-            "ready": '<span class="text-green-400">🟢 运行正常</span>',
-            "busy": '<span class="text-yellow-400">🟡 导航中</span>',
-            "error": '<span class="text-red-400">🔴 错误</span>',
+            "idle": '<span class="text-slate-400">🟢 Standby</span>',
+            "navigating": '<span class="text-yellow-400 animate-pulse">🟡 Navigating</span>',
+            "done": '<span class="text-emerald-400">🟢 Complete</span>',
+            "error": '<span class="text-red-500">🔴 Error</span>',
           };
-          document.getElementById('simStatus').innerHTML =
-            statusMap[data.simulator] || statusMap["error"];
-
+          
+          document.getElementById('sysStateHeader').innerHTML = (data.nav_status ? statusMap[data.nav_status] : "STANDBY").toUpperCase();
+          document.getElementById('agentMode').innerHTML = data.mode ? `<span class="px-2.5 py-1 bg-blue-900/30 text-blue-300 border border-blue-800/40 rounded-full text-[10px]">${data.mode}</span>` : 'STANDBY';
+          
+          // Mode Header mapping
+          document.getElementById('simModeHeader').textContent = data.mode === "mock" ? "MOCK SIMULATOR FALLBACK" : "HABITAT-SIM v0.3.3";
+          
+          if (data.success && data.current_scene) {
+            const selectEl = document.getElementById('sceneSelect');
+            if (selectEl && !selectEl.disabled) {
+              selectEl.value = data.current_scene;
+            }
+          }
+          
           const pos = data.agent_position;
           if (pos) {
             document.getElementById('agentPos').textContent =
               `(${pos[0].toFixed(2)}, ${pos[1].toFixed(2)}, ${pos[2].toFixed(2)})`;
           }
+          
+          document.getElementById('stepCount').textContent = `${data.step} / ${data.max_steps || 250}`;
+
+          // Update real-time CLIP confidence bar and labels
+          const score = data.current_clip_score || 0.0;
+          const peak = data.highest_conf_score || 0.0;
+          
+          const clipTextEl = document.getElementById('clipScoreText');
+          const clipBarEl = document.getElementById('clipScoreBar');
+          const peakTextEl = document.getElementById('peakScoreText');
+          
+          if (data.nav_status === 'navigating') {
+            clipTextEl.textContent = `${score.toFixed(2)}`;
+            
+            // Map similarity score range (e.g. 10 to 30) to percentage width
+            let percent = Math.min(100, Math.max(0, ((score - 10) / 20) * 100));
+            clipBarEl.style.width = `${percent}%`;
+            
+            // Shift colors depending on confidence levels
+            if (score >= 27.0) {
+              clipTextEl.className = "text-emerald-400 font-semibold animate-pulse";
+              clipBarEl.className = "h-full bg-emerald-500 rounded-full transition-all duration-300 shadow-md shadow-emerald-500/30";
+            } else if (score >= 20.0) {
+              clipTextEl.className = "text-amber-400 font-semibold";
+              clipBarEl.className = "h-full bg-amber-500 rounded-full transition-all duration-300 shadow-md shadow-amber-500/20";
+            } else {
+              clipTextEl.className = "text-slate-400 font-semibold";
+              clipBarEl.className = "h-full bg-slate-500 rounded-full transition-all duration-300";
+            }
+            
+            peakTextEl.textContent = `${peak.toFixed(2)}`;
+            if (peak >= 27.0) {
+              peakTextEl.className = "text-emerald-400 font-semibold";
+            } else if (peak >= 20.0) {
+              peakTextEl.className = "text-amber-400 font-semibold";
+            } else {
+              peakTextEl.className = "text-blue-400 font-semibold";
+            }
+          } else {
+            clipTextEl.textContent = "STANDBY";
+            clipTextEl.className = "text-slate-500 font-semibold";
+            clipBarEl.style.width = "0%";
+            clipBarEl.className = "h-full bg-slate-700 w-0 rounded-full transition-all duration-300";
+            
+            if (peak > 0) {
+              peakTextEl.textContent = `${peak.toFixed(2)}`;
+              peakTextEl.className = peak >= 27.0 ? "text-emerald-400 font-semibold" : "text-blue-400 font-semibold";
+            } else {
+              peakTextEl.textContent = "STANDBY";
+              peakTextEl.className = "text-slate-500 font-semibold";
+            }
+          }
+
+          // Handle dynamically stream thinking logs to thought chain console
+          if (data.thinking && data.thinking.length > 0) {
+            const console = document.getElementById('logConsole');
+            let formattedLogs = "";
+            data.thinking.forEach(line => {
+              let styleClass = "log-info";
+              if (line.includes("[SPIN]")) styleClass = "log-spin";
+              else if (line.includes("[EXPLORE]")) styleClass = "log-explore";
+              else if (line.includes("[EXPLOIT]")) styleClass = "log-exploit";
+              else if (line.includes("[DONE]") || line.includes("✓")) styleClass = "log-success";
+              else if (line.includes("[FAIL]") || line.includes("❌")) styleClass = "log-error";
+              
+              formattedLogs += `<div class="${styleClass}">${line}</div>`;
+            });
+            console.innerHTML = formattedLogs;
+            
+            // Auto scroll console to bottom if user is not actively viewing history
+            console.scrollTop = console.scrollHeight;
+          }
+          
+          // If arrived successfully, reveal pulsing "还需要什么" popup
+          if (data.nav_status === "done" && data.arrived && !isNavigating) {
+            document.getElementById('agentAsk').classList.remove('hidden');
+          } else {
+            document.getElementById('agentAsk').classList.add('hidden');
+          }
         })
         .catch(() => {
-          document.getElementById('simStatus').innerHTML =
-            '<span class="text-red-400">🔴 未连接</span>';
+          document.getElementById('sysStateHeader').innerHTML = '<span class="text-red-500 font-bold">DISCONNECTED</span>';
+          document.getElementById('videoPlaceholder').style.display = 'flex';
         });
     }
 
     function log(msg, type='info') {
       const console = document.getElementById('logConsole');
+      const timeStr = new Date().toTimeString().split(' ')[0];
       const prefix = { info: 'ℹ️', success: '✅', error: '❌', thinking: '🤔', nav: '🚶' }[type] || '•';
-      console.innerText += '\n' + prefix + ' ' + msg;
+      
+      let styleClass = "log-info";
+      if (type === 'success') styleClass = "log-success";
+      if (type === 'error') styleClass = "log-error";
+      if (type === 'thinking') styleClass = "log-spin";
+      if (type === 'nav') styleClass = "log-explore";
+
+      console.innerHTML += `<div class="${styleClass}">[${timeStr}] ${prefix} ${msg}</div>`;
       console.scrollTop = console.scrollHeight;
     }
 
     function sendDest(destination) {
-      const labels = { sofa: '沙发', bed: '床边', dining_table: '餐桌', desk: '书桌', exit: '门口' };
-      document.getElementById('cmdInput').value = '请到' + labels[destination] + '旁边';
+      const labels = { sofa: '沙发', dining_table: '餐桌', desk: '书桌', exit: '门口' };
+      document.getElementById('cmdInput').value = '请到' + (labels[destination] || destination) + '旁边';
       submitCommand();
     }
 
-    function submitCommand() {
-      const input = document.getElementById('cmdInput').value.trim();
-      if (!input) return;
+    function replyAgent(destination) {
+      document.getElementById('agentAsk').classList.add('hidden');
+      sendDest(destination);
+    }
 
-      // Infer destination from input
-      const dest = inferDestination(input);
-      if (!dest) {
-        log('无法识别导航目标，请使用快捷按钮或明确说明地点', 'error');
+    function submitCommand() {
+      if (isNavigating) {
+        // Morph behavior: click during navigation to stop / cancel!
+        abortNavigation();
         return;
       }
 
-      const labels = { sofa: '沙发', bed: '床边', dining_table: '餐桌', desk: '书桌', exit: '门口' };
-      log('→ ' + labels[dest], 'nav');
+      const input = document.getElementById('cmdInput').value.trim();
+      if (!input) return;
 
-      document.getElementById('submitBtn').disabled = true;
-      document.getElementById('submitBtn').innerText = '🚶 导航中...';
+      const dest = inferDestination(input);
+      if (!dest) {
+        log('无法自动识别导航目标，请使用快捷面板按钮或明确输入目标！', 'error');
+        return;
+      }
+
+      const labels = { sofa: '沙发', dining_table: '餐桌', desk: '书桌', exit: '门口' };
+      const displayLabel = labels[dest] || dest;
+      log('→ 规划具身指令，目的地：' + displayLabel, 'nav');
+
+      // Morph button to Cancel button (keep enabled so it is clickable!)
+      const submitBtn = document.getElementById('submitBtn');
+      submitBtn.innerText = '🛑 终止导航';
+      submitBtn.classList.replace('bg-blue-600', 'bg-red-600');
+      submitBtn.classList.replace('hover:bg-blue-500', 'hover:bg-red-500');
+      submitBtn.classList.replace('border-blue-500', 'border-red-500');
+      submitBtn.classList.replace('hover:border-blue-400', 'hover:border-red-400');
+      submitBtn.classList.replace('shadow-blue-900/30', 'shadow-red-900/30');
+      
       document.getElementById('agentAsk').classList.add('hidden');
       isNavigating = true;
+      startDynamicPolling();
 
       fetch(FLASK_BASE + "/api/navigate", {
         method: 'POST',
@@ -214,33 +513,59 @@
       .then(r => r.json())
       .then(data => {
         isNavigating = false;
-        document.getElementById('submitBtn').disabled = false;
-        document.getElementById('submitBtn').innerText = '▶ 执行导航';
+        startDynamicPolling();
+        
+        // Restore button state
+        const submitBtn = document.getElementById('submitBtn');
+        submitBtn.innerText = '🚀 执行具身导航';
+        submitBtn.classList.replace('bg-red-600', 'bg-blue-600');
+        submitBtn.classList.replace('hover:bg-red-500', 'hover:bg-blue-500');
+        submitBtn.classList.replace('border-red-500', 'border-blue-500');
+        submitBtn.classList.replace('hover:border-red-400', 'hover:border-blue-400');
+        submitBtn.classList.replace('shadow-red-900/30', 'shadow-blue-900/30');
 
         if (data.success && data.arrived) {
-          log('成功到达 ' + labels[dest] + '！', 'success');
-          log('最终位置: (' + data.arrived_position.map(v => v.toFixed(2)).join(', ') + ')', 'success');
+          log('成功抵达目的地： ' + displayLabel + '！', 'success');
           document.getElementById('agentAsk').classList.remove('hidden');
-        } else if (data.success) {
-          log('到达目标附近，但未精确抵达', 'error');
-          log('错误: ' + (data.error || '未知'), 'error');
         } else {
-          log('导航失败: ' + (data.error || '未知错误'), 'error');
-          log('错误码: ' + (data.code || 'N/A'), 'error');
+          log('导航已结束: ' + (data.error || '手动终止'), 'error');
         }
       })
       .catch(e => {
         isNavigating = false;
-        document.getElementById('submitBtn').disabled = false;
-        document.getElementById('submitBtn').innerText = '▶ 执行导航';
-        log('连接仿真器失败，请确保 server/app.py 已启动', 'error');
+        startDynamicPolling();
+        
+        const submitBtn = document.getElementById('submitBtn');
+        submitBtn.innerText = '🚀 执行具身导航';
+        submitBtn.classList.replace('bg-red-600', 'bg-blue-600');
+        submitBtn.classList.replace('hover:bg-red-500', 'hover:bg-blue-500');
+        submitBtn.classList.replace('border-red-500', 'border-blue-500');
+        submitBtn.classList.replace('hover:border-red-400', 'hover:border-blue-400');
+        submitBtn.classList.replace('shadow-red-900/30', 'shadow-blue-900/30');
+        
+        log('连接 Flask 后端失败，请检查 app.py 启动状态！', 'error');
       });
     }
 
+    function resetSimulator() {
+      log('🏠 正在请求重置仿真器智能体位置...', 'info');
+      fetch(FLASK_BASE + "/api/reset", { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+          if (data.success) {
+            log('仿真器重置成功，智能体已复位！', 'success');
+            document.getElementById('agentAsk').classList.add('hidden');
+          } else {
+            log('重置失败: ' + data.error, 'error');
+          }
+        })
+        .catch(() => log('重置指令通信失败！', 'error'));
+    }
+
     function inferDestination(text) {
+      // 1. First, check predefined target keywords and common aliases
       const patterns = [
-        [/(沙发|sofa|sofa|in living room)/i, 'sofa'],
-        [/(床|卧室|bed|bedroom|睡觉|睡眠)/i, 'bed'],
+        [/(沙发|sofa|in living room)/i, 'sofa'],
         [/(餐桌|餐厅|桌子|dining|table|吃饭)/i, 'dining_table'],
         [/(书桌|办公|desk|office|工作|书房)/i, 'desk'],
         [/(门口|门|出口|exit|door|出去|出门)/i, 'exit'],
@@ -248,11 +573,87 @@
       for (const [pattern, dest] of patterns) {
         if (pattern.test(text)) return dest;
       }
+
+      // 2. Otherwise, dynamically extract custom target name by stripping standard command prefixes/suffixes
+      let cleaned = text.trim();
+      
+      // Strip Chinese prefixes and suffixes
+      cleaned = cleaned.replace(/^(请到|请去|请走到|请前往|走到|去到|前往|请到|到|去|寻找|找)/g, "");
+      cleaned = cleaned.replace(/(旁边|附近|那里|那边|边|处|区域|里|下|上)$/g, "");
+      
+      // Strip English prefixes and suffixes
+      cleaned = cleaned.replace(/^(please go to|go to|walk to|head to|please walk to|find|search)/i, "");
+      cleaned = cleaned.replace(/(next to|beside|near|area|side|by)$/i, "");
+      
+      // Strip dynamic articles
+      cleaned = cleaned.replace(/^(the |a |an )/i, "");
+      
+      cleaned = cleaned.trim();
+      
+      if (cleaned.length > 0) {
+        return cleaned;
+      }
       return null;
     }
 
     function videoError() {
       document.getElementById('videoPlaceholder').style.display = 'flex';
+    }
+
+    function switchScene(sceneKey) {
+      log('🌍 正在请求切换仿真场景至: ' + sceneKey.toUpperCase() + '...', 'info');
+      
+      const selector = document.getElementById('sceneSelect');
+      selector.disabled = true;
+      
+      fetch(FLASK_BASE + "/api/change_scene", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scene: sceneKey })
+      })
+      .then(r => r.json())
+      .then(data => {
+        selector.disabled = false;
+        if (data.success) {
+          log('🎉 场景成功切换为 ' + sceneKey.toUpperCase() + '！智能体已在新场景复位，地图体素已清空！', 'success');
+          document.getElementById('agentAsk').classList.add('hidden');
+        } else {
+          log('切换场景失败: ' + (data.error || '未知错误'), 'error');
+          syncSceneSelect();
+        }
+      })
+      .catch(() => {
+        selector.disabled = false;
+        log('与 Flask 后端通信失败，场景未切换！', 'error');
+        syncSceneSelect();
+      });
+    }
+
+    function syncSceneSelect() {
+      fetch(FLASK_BASE + "/api/status")
+        .then(r => r.json())
+        .then(data => {
+          if (data.success && data.current_scene) {
+            document.getElementById('sceneSelect').value = data.current_scene;
+          }
+        })
+        .catch(() => {});
+    }
+
+    function abortNavigation() {
+      log('🛑 正在向 Flask 发送终止导航指令...', 'info');
+      fetch(FLASK_BASE + "/api/abort", { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+          if (data.success) {
+            log('终止指令已成功发送，正在刹车停下...', 'success');
+          } else {
+            log('发送终止指令失败: ' + data.error, 'error');
+          }
+        })
+        .catch(() => {
+          log('与 Flask 通信异常，无法发送终止指令！', 'error');
+        });
     }
   </script>
 </body>
